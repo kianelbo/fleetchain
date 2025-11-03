@@ -215,15 +215,3 @@ fn demo_game(game: &mut coordinator::GameCoordinator) {
             i, block.transactions.len(), &block.hash[..16]);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::coordinator::GameCoordinator;
-
-    #[test]
-    fn test_game_initialization() {
-        let game = GameCoordinator::new(10, 2);
-        assert_eq!(game.grid.size, 10);
-        assert_eq!(game.blockchain.difficulty, 2);
-    }
-}

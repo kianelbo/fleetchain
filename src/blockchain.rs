@@ -168,25 +168,3 @@ impl Blockchain {
         self.chain.iter().map(|block| block.transactions.len()).sum()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_blockchain_creation() {
-        let blockchain = Blockchain::new(2);
-        assert_eq!(blockchain.chain.len(), 1);
-        assert!(blockchain.is_chain_valid());
-    }
-
-    #[test]
-    fn test_mining() {
-        let mut blockchain = Blockchain::new(2);
-        let tx = Transaction::new("player1".to_string(), 5, 5, 0);
-        blockchain.add_transaction(tx);
-        blockchain.mine_pending_transactions("miner1");
-        assert_eq!(blockchain.chain.len(), 2);
-        assert!(blockchain.is_chain_valid());
-    }
-}

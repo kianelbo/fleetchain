@@ -54,7 +54,9 @@ src/
 ├── game.rs          # Game logic (Grid, Ship, Player, HitReport)
 ├── crypto.rs        # Cryptographic functions (commitments, ZK proofs)
 ├── coordinator.rs   # Game coordinator (orchestrates blockchain + game state)
-└── main.rs          # Demo application
+├── network.rs       # Network node and peer management
+├── api.rs           # HTTP API endpoints for node communication
+└── main.rs          # Network node application
 ```
 
 ## Core Components
@@ -88,22 +90,129 @@ src/
 # Build the project
 cargo build --release
 
-# Run the demo
-cargo run
+# Run a single node
+cargo run -- --port 8080 --node-id node1
+
+# Run with demo mode (includes test game)
+cargo run -- --port 8080 --node-id node1 --demo
 
 # Run tests
 cargo test
 ```
 
-### Demo Output
+### Running a Multi-Node Network
 
-The demo showcases:
-1. Player registration with cryptographic commitments
-2. Mining for shots
-3. Firing shots (creating transactions)
-4. Mining transactions into blocks
-5. Blockchain validation
-6. Game statistics
+Start multiple nodes and connect them as peers:
+
+```bash
+# Terminal 1: Start first node
+cargo run -- --port 8080 --node-id node1
+
+# Terminal 2: Start second node and connect to first
+cargo run -- --port 8081 --node-id node2 --peers localhost:8080
+
+# Terminal 3: Start third node and connect to network
+cargo run -- --port 8082 --node-id node3 --peers localhost:8080,localhost:8081
+```
+
+### Command Line Options
+
+```
+Options:
+  -p, --port <PORT>              Port to run the node on [default: 8080]
+  -n, --node-id <NODE_ID>        Node ID (unique identifier) [default: node1]
+  -g, --grid-size <GRID_SIZE>    Grid size for battleship [default: 10]
+  -d, --difficulty <DIFFICULTY>  Mining difficulty [default: 2]
+      --peers <PEERS>            Peer addresses (format: host:port,host:port)
+      --demo                     Run in demo mode with test game
+  -h, --help                     Print help
+  -V, --version                  Print version
+```
+
+### HTTP API Endpoints
+
+Once a node is running, you can interact with it via HTTP:
+
+#### Blockchain Endpoints
+- `GET /api/blockchain` - Get the entire blockchain
+- `POST /api/block` - Receive a new block from peer
+- `POST /api/transaction` - Receive a new transaction from peer
+
+#### Game Endpoints
+- `POST /api/register` - Register a new player
+  ```json
+  {
+    "player_id": "player1",
+    "ships": [...],
+    "board_commitment": "abc123...",
+    "salt": "xyz789..."
+  }
+  ```
+- `POST /api/fire` - Fire a shot
+  ```json
+  {
+    "player_id": "player1",
+    "target_x": 5,
+    "target_y": 5
+  }
+  ```
+- `POST /api/mine` - Mine for shots
+  ```json
+  {
+    "player_id": "player1"
+  }
+  ```
+
+#### Network Endpoints
+- `GET /api/peers` - Get all connected peers
+- `POST /api/peers` - Add a new peer
+  ```json
+  {
+    "address": "localhost",
+    "port": 8081
+  }
+  ```
+- `POST /api/sync` - Synchronize blockchain with all peers
+
+#### Info Endpoints
+- `GET /api/info` - Get node information
+- `GET /api/stats` - Get game statistics
+
+### Example: Playing via API
+
+```bash
+# Register a player on node 1
+curl -X POST http://localhost:8080/api/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "player_id": "alice",
+    "ships": [
+      {
+        "id": "carrier",
+        "positions": [[0,0],[0,1],[0,2],[0,3],[0,4]],
+        "hits": [false,false,false,false,false]
+      }
+    ],
+    "board_commitment": "...",
+    "salt": "..."
+  }'
+
+# Mine for shots
+curl -X POST http://localhost:8080/api/mine \
+  -H "Content-Type: application/json" \
+  -d '{"player_id": "alice"}'
+
+# Fire a shot (automatically broadcasts to peers)
+curl -X POST http://localhost:8080/api/fire \
+  -H "Content-Type: application/json" \
+  -d '{"player_id": "alice", "target_x": 5, "target_y": 5}'
+
+# Check node info
+curl http://localhost:8080/api/info
+
+# Get blockchain
+curl http://localhost:8080/api/blockchain
+```
 
 ## Game Flow
 
@@ -157,16 +266,41 @@ The demo showcases:
 - **Mining**: Fair shot distribution through proof-of-work
 - **Validation**: Full blockchain validation ensures integrity
 
+## Network Features
+
+### 🌐 Distributed Blockchain
+- Each node maintains its own copy of the blockchain
+- Nodes automatically synchronize when connecting to peers
+- Longest valid chain wins (consensus mechanism)
+
+### 📡 Gossip Protocol
+- New transactions are broadcast to all connected peers
+- Newly mined blocks are propagated across the network
+- Automatic peer discovery and announcement
+
+### 🔄 Peer-to-Peer Communication
+- HTTP-based communication between nodes
+- RESTful API for all game actions
+- Automatic blockchain synchronization on startup
+
+### 🎮 Multiplayer Support
+- Players can join from any node in the network
+- Actions on one node are visible to all peers
+- Shared game state across the network
+
 ## Future Enhancements
 
 - [ ] Implement full ZK-SNARKs using bellman/bls12_381
-- [ ] Add network layer for multiplayer
+- [x] Add network layer for multiplayer (✓ Completed)
 - [ ] Implement smart contract-like game rules
 - [ ] Add penalty system for false reports
 - [ ] Create web-based UI
 - [ ] Add replay functionality from blockchain
 - [ ] Implement tournament mode
 - [ ] Add different ship types and abilities
+- [ ] Add WebSocket support for real-time updates
+- [ ] Implement DHT for better peer discovery
+- [ ] Add NAT traversal for public internet play
 
 ## Technical Details
 
@@ -177,6 +311,10 @@ The demo showcases:
 - `rand`: Random number generation for salts
 - `chrono`: Timestamp management
 - `bellman/bls12_381`: ZK-SNARK libraries (for future full implementation)
+- `tokio`: Async runtime for network operations
+- `axum`: Web framework for HTTP API
+- `reqwest`: HTTP client for peer communication
+- `clap`: Command-line argument parsing
 
 ### Mining Difficulty
 The mining difficulty determines how many leading zeros are required in block hashes. Higher difficulty = more computation required = fairer distribution.
