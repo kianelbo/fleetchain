@@ -95,7 +95,7 @@ impl fmt::Display for Block {
 }
 
 /// The blockchain itself
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,

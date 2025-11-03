@@ -157,7 +157,7 @@ impl GameCoordinator {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GameStats {
     pub round: u32,
     pub total_players: usize,

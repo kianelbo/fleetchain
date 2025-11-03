@@ -2,27 +2,123 @@ mod blockchain;
 mod game;
 mod crypto;
 mod coordinator;
+mod network;
+mod api;
 
-use coordinator::GameCoordinator;
-use game::Ship;
-use crypto::{generate_salt, create_commitment};
+use clap::Parser;
+use network::{NetworkNode, Peer};
+use std::sync::Arc;
 
-fn main() {
-    println!("=== FleetChain: Blockchain Battleship ===\n");
+/// FleetChain: Distributed Blockchain Battleship
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Port to run the node on
+    #[arg(short, long, default_value_t = 8080)]
+    port: u16,
 
-    // Initialize game
-    let grid_size = 10;
-    let mining_difficulty = 2;
-    let mut game = GameCoordinator::new(grid_size, mining_difficulty);
+    /// Node ID (unique identifier for this node)
+    #[arg(short, long, default_value = "node1")]
+    node_id: String,
 
-    println!("Game initialized with {}x{} grid", grid_size, grid_size);
-    println!("Mining difficulty: {}\n", mining_difficulty);
+    /// Grid size for the battleship game
+    #[arg(short, long, default_value_t = 10)]
+    grid_size: u8,
 
-    // Demo: Register two players
-    demo_game(&mut game);
+    /// Mining difficulty (number of leading zeros)
+    #[arg(short, long, default_value_t = 2)]
+    difficulty: usize,
+
+    /// Peer addresses to connect to (format: host:port)
+    #[arg(long, value_delimiter = ',')]
+    peers: Vec<String>,
+
+    /// Run in demo mode (single node with test game)
+    #[arg(long)]
+    demo: bool,
 }
 
-fn demo_game(game: &mut GameCoordinator) {
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
+
+    println!("=== FleetChain: Blockchain Battleship ===");
+    println!("Node ID: {}", args.node_id);
+    println!("Port: {}", args.port);
+    println!("Grid Size: {}x{}", args.grid_size, args.grid_size);
+    println!("Mining Difficulty: {}\n", args.difficulty);
+
+    // Create network node
+    let node = Arc::new(NetworkNode::new(
+        args.node_id.clone(),
+        args.port,
+        args.grid_size,
+        args.difficulty,
+    ));
+
+    // Connect to peers
+    if !args.peers.is_empty() {
+        println!("Connecting to peers...");
+        for peer_addr in &args.peers {
+            if let Some((host, port_str)) = peer_addr.split_once(':') {
+                if let Ok(port) = port_str.parse::<u16>() {
+                    let peer = Peer::new(host.to_string(), port);
+                    node.add_peer(peer.clone()).await;
+                    println!("✓ Added peer: {}", peer.url());
+                    
+                    // Announce ourselves to the peer
+                    if let Err(e) = node.announce_to_peer(&peer).await {
+                        eprintln!("✗ Failed to announce to peer: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Sync blockchain with network
+        println!("\nSynchronizing blockchain...");
+        if let Err(e) = node.sync_with_network().await {
+            eprintln!("✗ Sync failed: {}", e);
+        } else {
+            println!("✓ Blockchain synchronized");
+        }
+    }
+
+    if args.demo {
+        // Run demo mode
+        println!("\n=== Running Demo Mode ===\n");
+        run_demo(node.clone()).await;
+    }
+
+    // Start HTTP server
+    println!("\n=== Starting HTTP Server ===");
+    println!("Listening on http://localhost:{}", args.port);
+    println!("\nAvailable endpoints:");
+    println!("  GET  /api/info           - Node information");
+    println!("  GET  /api/stats          - Game statistics");
+    println!("  GET  /api/blockchain     - Full blockchain");
+    println!("  GET  /api/peers          - Connected peers");
+    println!("  POST /api/register       - Register player");
+    println!("  POST /api/fire           - Fire shot");
+    println!("  POST /api/mine           - Mine for shots");
+    println!("  POST /api/peers          - Add peer");
+    println!("  POST /api/sync           - Sync blockchain\n");
+
+    let app = api::create_router(node);
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port))
+        .await
+        .unwrap();
+
+    axum::serve(listener, app).await.unwrap();
+}
+
+async fn run_demo(node: Arc<NetworkNode>) {
+    let mut coordinator = node.coordinator.write().await;
+    demo_game(&mut coordinator);
+}
+
+fn demo_game(game: &mut coordinator::GameCoordinator) {
+    use game::Ship;
+    use crypto::{generate_salt, create_commitment};
     // Player 1 setup
     println!("Registering Player 1...");
     let player1_ships = vec![
@@ -122,7 +218,7 @@ fn demo_game(game: &mut GameCoordinator) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::coordinator::GameCoordinator;
 
     #[test]
     fn test_game_initialization() {
