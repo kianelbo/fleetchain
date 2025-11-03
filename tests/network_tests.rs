@@ -3,6 +3,16 @@ use fleetchain::game::Ship;
 use fleetchain::crypto::{generate_salt, create_commitment};
 use fleetchain::blockchain::Transaction;
 
+// Helper function to create a valid 4-ship fleet
+fn create_valid_fleet() -> Vec<Ship> {
+    vec![
+        Ship::new("Carrier".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
+        Ship::new("Cruiser".to_string(), vec![(2, 0), (2, 1), (2, 2)]),
+        Ship::new("Submarine".to_string(), vec![(4, 0), (4, 1)]),
+        Ship::new("Destroyer".to_string(), vec![(6, 0)]),
+    ]
+}
+
 #[tokio::test]
 async fn test_network_node_creation() {
     let node = NetworkNode::new("node1".to_string(), 8080, 10, 2);
@@ -123,7 +133,7 @@ async fn test_concurrent_peer_operations() {
 async fn test_node_with_game_state() {
     let node = NetworkNode::new("node1".to_string(), 8080, 10, 2);
     
-    let ships = vec![Ship::new("carrier".to_string(), vec![(0, 0), (0, 1)])];
+    let ships = create_valid_fleet();
     let positions: Vec<(u8, u8)> = ships.iter()
         .flat_map(|s| s.positions.clone())
         .collect();
@@ -146,7 +156,7 @@ async fn test_node_with_game_state() {
 async fn test_node_mining() {
     let node = NetworkNode::new("node1".to_string(), 8080, 10, 2);
     
-    let ships = vec![Ship::new("carrier".to_string(), vec![(0, 0)])];
+    let ships = create_valid_fleet();
     let positions: Vec<(u8, u8)> = ships.iter()
         .flat_map(|s| s.positions.clone())
         .collect();
@@ -166,7 +176,7 @@ async fn test_node_mining() {
 async fn test_node_transaction_handling() {
     let node = NetworkNode::new("node1".to_string(), 8080, 10, 2);
     
-    let ships = vec![Ship::new("carrier".to_string(), vec![(0, 0)])];
+    let ships = create_valid_fleet();
     let positions: Vec<(u8, u8)> = ships.iter()
         .flat_map(|s| s.positions.clone())
         .collect();
@@ -188,7 +198,7 @@ async fn test_multiple_nodes_independent_state() {
     let node2 = NetworkNode::new("node2".to_string(), 8081, 10, 2);
     
     // Register player on node1
-    let ships = vec![Ship::new("carrier".to_string(), vec![(0, 0)])];
+    let ships = create_valid_fleet();
     let positions: Vec<(u8, u8)> = ships.iter()
         .flat_map(|s| s.positions.clone())
         .collect();

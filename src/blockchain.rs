@@ -24,6 +24,7 @@ impl Transaction {
         }
     }
 
+    #[allow(dead_code)]
     pub fn hash(&self) -> String {
         let data = serde_json::to_string(self).unwrap();
         let mut hasher = Sha256::new();
@@ -129,7 +130,7 @@ impl Blockchain {
     }
 
     /// Mine pending transactions and reward the miner with shots
-    pub fn mine_pending_transactions(&mut self, miner_address: &str) -> u32 {
+    pub fn mine_pending_transactions(&mut self, _miner_address: &str) -> u32 {
         let mut block = Block::new(
             self.chain.len() as u64,
             self.pending_transactions.clone(),

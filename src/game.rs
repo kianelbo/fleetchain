@@ -15,12 +15,14 @@ impl Ship {
         Self { id, positions, hits }
     }
 
+    #[allow(dead_code)]
     pub fn is_hit_at(&self, x: u8, y: u8) -> bool {
         self.positions.iter().position(|&pos| pos == (x, y))
             .map(|idx| self.hits[idx])
             .unwrap_or(false)
     }
 
+    #[allow(dead_code)]
     pub fn register_hit(&mut self, x: u8, y: u8) -> bool {
         if let Some(idx) = self.positions.iter().position(|&pos| pos == (x, y)) {
             self.hits[idx] = true;
@@ -67,6 +69,7 @@ impl Grid {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get_players_at(&self, x: u8, y: u8) -> Vec<String> {
         self.cells.get(&(x, y))
             .cloned()
@@ -77,9 +80,12 @@ impl Grid {
 /// Represents a player in the game
 #[derive(Debug, Clone)]
 pub struct Player {
+    #[allow(dead_code)]
     pub id: String,
     pub ships: Vec<Ship>,
+    #[allow(dead_code)]
     pub board_commitment: String,
+    #[allow(dead_code)]
     pub salt: String,
     pub shots_available: u32,
     pub shots_fired: Vec<(u8, u8)>,
@@ -110,6 +116,7 @@ impl Player {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn check_hit(&mut self, x: u8, y: u8) -> bool {
         for ship in &mut self.ships {
             if ship.register_hit(x, y) {
@@ -123,6 +130,7 @@ impl Player {
         self.ships.iter().all(|ship| ship.is_sunk())
     }
 
+    #[allow(dead_code)]
     pub fn get_all_ship_positions(&self) -> Vec<(u8, u8)> {
         self.ships.iter()
             .flat_map(|ship| ship.positions.clone())
@@ -141,6 +149,7 @@ pub struct HitReport {
 }
 
 impl HitReport {
+    #[allow(dead_code)]
     pub fn new(player_id: String, shot_x: u8, shot_y: u8, is_hit: bool, proof: Vec<u8>) -> Self {
         Self {
             player_id,

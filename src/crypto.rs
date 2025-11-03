@@ -48,10 +48,11 @@ pub struct HitProof {
 
 impl HitProof {
     /// Generate a proof that a position contains a ship (hit case)
+    #[allow(dead_code)]
     pub fn prove_hit(
         position: (u8, u8),
-        all_positions: &[(u8, u8)],
-        board_salt: &str,
+        _all_positions: &[(u8, u8)],
+        _board_salt: &str,
     ) -> Self {
         // Create a commitment to the specific position
         let position_salt = generate_salt();
@@ -66,8 +67,9 @@ impl HitProof {
 
     /// Generate a proof that a position does NOT contain a ship (miss case)
     /// This is more complex in real ZK - here we use a simplified approach
+    #[allow(dead_code)]
     pub fn prove_miss(
-        shot_position: (u8, u8),
+        _shot_position: (u8, u8),
         all_positions: &[(u8, u8)],
         board_salt: &str,
     ) -> Self {
@@ -84,10 +86,11 @@ impl HitProof {
     }
 
     /// Verify a hit proof
+    #[allow(dead_code)]
     pub fn verify_hit(
         &self,
         shot_position: (u8, u8),
-        board_commitment: &str,
+        _board_commitment: &str,
     ) -> bool {
         if let Some(revealed_pos) = self.revealed_position {
             // Verify the revealed position matches the shot
@@ -104,9 +107,10 @@ impl HitProof {
     }
 
     /// Verify a miss proof
+    #[allow(dead_code)]
     pub fn verify_miss(
         &self,
-        shot_position: (u8, u8),
+        _shot_position: (u8, u8),
         board_commitment: &str,
     ) -> bool {
         // For miss, we just verify the board commitment matches
@@ -114,6 +118,7 @@ impl HitProof {
         self.commitment == board_commitment && self.revealed_position.is_none()
     }
 
+    #[allow(dead_code)]
     pub fn serialize(&self) -> Vec<u8> {
         serde_json::to_vec(self).unwrap_or_default()
     }

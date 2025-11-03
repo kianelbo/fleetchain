@@ -10,6 +10,16 @@ use fleetchain::game::Ship;
 use fleetchain::crypto::{generate_salt, create_commitment};
 use fleetchain::blockchain::{Block, Transaction};
 
+// Helper function to create a valid 4-ship fleet
+fn create_valid_fleet() -> Vec<Ship> {
+    vec![
+        Ship::new("Carrier".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
+        Ship::new("Cruiser".to_string(), vec![(2, 0), (2, 1), (2, 2)]),
+        Ship::new("Submarine".to_string(), vec![(4, 0), (4, 1)]),
+        Ship::new("Destroyer".to_string(), vec![(6, 0)]),
+    ]
+}
+
 #[tokio::test]
 async fn test_get_blockchain() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
@@ -33,9 +43,7 @@ async fn test_register_player() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
     let app = create_router(node.clone());
 
-    let ships = vec![
-        Ship::new("ship1".to_string(), vec![(0, 0), (0, 1), (0, 2)]),
-    ];
+    let ships = create_valid_fleet();
 
     let all_positions: Vec<(u8, u8)> = ships.iter()
         .flat_map(|ship| ship.positions.clone())
@@ -71,9 +79,7 @@ async fn test_register_player_invalid_commitment() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
     let app = create_router(node.clone());
 
-    let ships = vec![
-        Ship::new("ship1".to_string(), vec![(0, 0), (0, 1), (0, 2)]),
-    ];
+    let ships = create_valid_fleet();
 
     let salt = generate_salt();
     // Create commitment with different positions than the ships
@@ -109,7 +115,7 @@ async fn test_mine_for_shots() {
     // Register a player first
     {
         let mut coordinator = node.coordinator.write().await;
-        let ships = vec![Ship::new("ship1".to_string(), vec![(0, 0), (0, 1)])];
+        let ships = create_valid_fleet();
         let all_positions: Vec<(u8, u8)> = ships.iter()
             .flat_map(|ship| ship.positions.clone())
             .collect();
@@ -146,7 +152,7 @@ async fn test_fire_shot() {
     // Register a player and mine for shots
     {
         let mut coordinator = node.coordinator.write().await;
-        let ships = vec![Ship::new("ship1".to_string(), vec![(0, 0), (0, 1)])];
+        let ships = create_valid_fleet();
         let all_positions: Vec<(u8, u8)> = ships.iter()
             .flat_map(|ship| ship.positions.clone())
             .collect();
@@ -186,7 +192,7 @@ async fn test_fire_shot_without_shots() {
     // Register a player but don't mine for shots
     {
         let mut coordinator = node.coordinator.write().await;
-        let ships = vec![Ship::new("ship1".to_string(), vec![(0, 0), (0, 1)])];
+        let ships = create_valid_fleet();
         let all_positions: Vec<(u8, u8)> = ships.iter()
             .flat_map(|ship| ship.positions.clone())
             .collect();

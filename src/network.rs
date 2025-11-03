@@ -47,6 +47,7 @@ impl NetworkNode {
     }
 
     /// Remove a peer from the network
+    #[allow(dead_code)]
     pub async fn remove_peer(&self, peer: &Peer) {
         let mut peers = self.peers.write().await;
         peers.remove(peer);

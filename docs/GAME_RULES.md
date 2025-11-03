@@ -13,14 +13,16 @@ FleetChain is a blockchain-based Battleship game where players compete on a shar
 
 ### Fleet Composition
 
-Each player deploys a fleet of ships. Standard configuration:
-- **Carrier**: 5 cells
-- **Battleship**: 4 cells
-- **Cruiser**: 3 cells
-- **Submarine**: 3 cells
-- **Destroyer**: 2 cells
+Each player must deploy exactly 4 ships:
+- **Carrier**: 4 cells (horizontal or vertical)
+- **Cruiser**: 3 cells (horizontal or vertical)
+- **Submarine**: 2 cells (horizontal or vertical)
+- **Destroyer**: 1 cell
 
-Players can customize their fleet composition.
+**Ship Placement Rules**:
+- Ships can be placed horizontally or vertically
+- Ships can overlap with other players' ships on the shared grid
+- All ship positions must be within grid boundaries
 
 ## Registration Phase
 
@@ -29,8 +31,10 @@ Players secretly place their ships on the grid by choosing coordinates for each 
 
 Example:
 ```
-Carrier: (0,0), (0,1), (0,2), (0,3), (0,4)
-Battleship: (2,0), (2,1), (2,2), (2,3)
+Carrier: (0,0), (0,1), (0,2), (0,3)     # 4 cells horizontal
+Cruiser: (2,0), (2,1), (2,2)            # 3 cells horizontal
+Submarine: (4,0), (4,1)                 # 2 cells horizontal
+Destroyer: (6,0)                        # 1 cell
 ```
 
 ### Step 2: Create Commitment
@@ -70,6 +74,14 @@ Players must **mine** to earn shots. Mining involves:
 - **More mining** = More shots but less time attacking
 - **Less mining** = Fewer shots but more time for strategy
 - Balance is key!
+
+### Defeated Players
+
+**When a player is defeated** (all ships sunk):
+- They **cannot mine** for new blocks
+- They **cannot earn** shot rewards
+- They are eliminated from the game
+- Their blockchain transactions remain in history
 
 ## Combat Phase
 
@@ -144,13 +156,20 @@ The game verifies each report:
 ### Ship Sinking
 
 A ship is sunk when all its positions are hit:
-- Carrier: 5 hits to sink
-- Battleship: 4 hits to sink
-- Destroyer: 3 hits to sink
+- **Carrier**: 4 hits to sink
+- **Cruiser**: 3 hits to sink
+- **Submarine**: 2 hits to sink
+- **Destroyer**: 1 hit to sink
 
 ### Player Elimination
 
-A player is eliminated when ALL their ships are sunk.
+A player is **defeated** when ALL their ships are sunk.
+
+**Consequences of Defeat**:
+- Cannot mine new blocks
+- Cannot earn shot rewards from mining
+- Cannot fire new shots (if they have no shots remaining)
+- Removed from active player list
 
 ### Game Winner
 

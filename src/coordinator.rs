@@ -1,6 +1,6 @@
 use crate::blockchain::{Blockchain, Transaction};
 use crate::game::{Grid, Player, Ship, HitReport};
-use crate::crypto::{create_commitment, verify_commitment, HitProof};
+use crate::crypto::{verify_commitment, HitProof};
 use std::collections::HashMap;
 
 /// Coordinates the entire game including blockchain and game state
@@ -29,6 +29,29 @@ impl GameCoordinator {
         board_commitment: String,
         salt: String,
     ) -> Result<(), String> {
+        // Validate fleet composition: must have exactly 4 ships
+        if ships.len() != 4 {
+            return Err("Fleet must contain exactly 4 ships".to_string());
+        }
+
+        // Validate ship sizes and check for required ships
+        let mut ship_sizes: Vec<usize> = ships.iter()
+            .map(|ship| ship.positions.len())
+            .collect();
+        ship_sizes.sort_unstable();
+
+        // Required: 1 Destroyer (1 cell), 1 Submarine (2 cells), 1 Cruiser (3 cells), 1 Carrier (4 cells)
+        if ship_sizes != vec![1, 2, 3, 4] {
+            return Err("Fleet must contain: 1 Carrier (4 cells), 1 Cruiser (3 cells), 1 Submarine (2 cells), 1 Destroyer (1 cell)".to_string());
+        }
+
+        // Validate ship placement (horizontal or vertical)
+        for ship in &ships {
+            if !Self::is_valid_ship_placement(&ship.positions) {
+                return Err(format!("Ship '{}' must be placed horizontally or vertically in a continuous line", ship.id));
+            }
+        }
+
         // Verify the commitment matches the ships
         let all_positions: Vec<(u8, u8)> = ships.iter()
             .flat_map(|ship| ship.positions.clone())
@@ -50,10 +73,52 @@ impl GameCoordinator {
         Ok(())
     }
 
+    /// Validate that a ship is placed horizontally or vertically in a continuous line
+    fn is_valid_ship_placement(positions: &[(u8, u8)]) -> bool {
+        if positions.is_empty() {
+            return false;
+        }
+        if positions.len() == 1 {
+            return true; // Single cell is always valid
+        }
+
+        let mut sorted_positions = positions.to_vec();
+        sorted_positions.sort_unstable();
+
+        // Check if horizontal (same y, consecutive x)
+        let all_same_y = sorted_positions.iter().all(|&(_, y)| y == sorted_positions[0].1);
+        if all_same_y {
+            for i in 1..sorted_positions.len() {
+                if sorted_positions[i].0 != sorted_positions[i - 1].0 + 1 {
+                    return false; // Not consecutive
+                }
+            }
+            return true;
+        }
+
+        // Check if vertical (same x, consecutive y)
+        let all_same_x = sorted_positions.iter().all(|&(x, _)| x == sorted_positions[0].0);
+        if all_same_x {
+            for i in 1..sorted_positions.len() {
+                if sorted_positions[i].1 != sorted_positions[i - 1].1 + 1 {
+                    return false; // Not consecutive
+                }
+            }
+            return true;
+        }
+
+        false // Neither horizontal nor vertical
+    }
+
     /// Allow a player to mine for shots
     pub fn mine_for_shots(&mut self, player_id: &str) -> Result<u32, String> {
         if !self.players.contains_key(player_id) {
             return Err("Player not found".to_string());
+        }
+
+        // Check if player is defeated
+        if self.is_player_defeated(player_id) {
+            return Err("Defeated players cannot mine".to_string());
         }
 
         // Mine pending transactions
@@ -88,6 +153,7 @@ impl GameCoordinator {
     }
 
     /// Process hit reports with ZK proofs
+    #[allow(dead_code)]
     pub fn report_hit(
         &mut self,
         report: HitReport,
@@ -136,6 +202,7 @@ impl GameCoordinator {
     }
 
     /// Advance to next round
+    #[allow(dead_code)]
     pub fn next_round(&mut self) {
         self.round += 1;
     }
