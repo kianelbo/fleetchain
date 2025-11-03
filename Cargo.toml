@@ -1,0 +1,20 @@
+[package]
+name = "fleetchain"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "fleetchain"
+path = "src/lib.rs"
+
+[dependencies]
+sha2 = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+rand = "0.8"
+chrono = "0.4"
+bellman = "0.14"
+bls12_381 = "0.8"
+ff = "0.13"
+group = "0.13"
