@@ -1,4 +1,6 @@
 use fleetchain::blockchain::{Blockchain, Transaction, Block};
+use std::fs;
+use std::path::PathBuf;
 
 #[test]
 fn test_genesis_block_creation() {
@@ -217,4 +219,130 @@ fn test_blockchain_immutability() {
     // Hash should be different now, making chain invalid
     assert_ne!(blockchain.chain[1].calculate_hash(), original_hash);
     assert!(!blockchain.is_chain_valid());
+}
+
+#[test]
+fn test_blockchain_persistence_save_and_load() {
+    let test_path = PathBuf::from("test_blockchain_save.json");
+    
+    // Clean up any existing test file
+    let _ = fs::remove_file(&test_path);
+    
+    // Create and save blockchain
+    let mut blockchain = Blockchain::new(2);
+    let tx1 = Transaction::new("player1".to_string(), 5, 5, 0);
+    let tx2 = Transaction::new("player2".to_string(), 3, 7, 0);
+    blockchain.add_transaction(tx1);
+    blockchain.add_transaction(tx2);
+    blockchain.mine_pending_transactions("miner1");
+    
+    let original_length = blockchain.chain.len();
+    let original_tx_count = blockchain.get_transaction_count();
+    
+    // Save to file
+    blockchain.save_to_file(&test_path).expect("Failed to save blockchain");
+    assert!(test_path.exists());
+    
+    // Load from file
+    let loaded_blockchain = Blockchain::load_from_file(&test_path)
+        .expect("Failed to load blockchain");
+    
+    // Verify loaded blockchain matches original
+    assert_eq!(loaded_blockchain.chain.len(), original_length);
+    assert_eq!(loaded_blockchain.get_transaction_count(), original_tx_count);
+    assert_eq!(loaded_blockchain.difficulty, blockchain.difficulty);
+    assert!(loaded_blockchain.is_chain_valid());
+    
+    // Clean up
+    fs::remove_file(&test_path).ok();
+}
+
+#[test]
+fn test_blockchain_persistence_file_exists() {
+    let test_path = PathBuf::from("test_blockchain_exists.json");
+    
+    // Clean up any existing test file
+    let _ = fs::remove_file(&test_path);
+    
+    assert!(!Blockchain::file_exists(&test_path));
+    
+    let blockchain = Blockchain::new(2);
+    blockchain.save_to_file(&test_path).expect("Failed to save blockchain");
+    
+    assert!(Blockchain::file_exists(&test_path));
+    
+    // Clean up
+    fs::remove_file(&test_path).ok();
+}
+
+#[test]
+fn test_blockchain_persistence_validates_on_load() {
+    let test_path = PathBuf::from("test_blockchain_invalid.json");
+    
+    // Clean up any existing test file
+    let _ = fs::remove_file(&test_path);
+    
+    // Create a blockchain and save it
+    let mut blockchain = Blockchain::new(2);
+    let tx = Transaction::new("player1".to_string(), 5, 5, 0);
+    blockchain.add_transaction(tx);
+    blockchain.mine_pending_transactions("miner1");
+    blockchain.save_to_file(&test_path).expect("Failed to save blockchain");
+    
+    // Load it successfully first
+    let loaded = Blockchain::load_from_file(&test_path);
+    assert!(loaded.is_ok(), "Should load valid blockchain");
+    
+    // Manually tamper with the file - change the nonce to invalidate proof of work
+    let json = fs::read_to_string(&test_path).unwrap();
+    let mut blockchain_data: serde_json::Value = serde_json::from_str(&json).unwrap();
+    
+    // Tamper with the first non-genesis block's nonce
+    if let Some(block) = blockchain_data["chain"].as_array_mut().and_then(|arr| arr.get_mut(1)) {
+        block["nonce"] = serde_json::json!(999999);
+    }
+    
+    fs::write(&test_path, serde_json::to_string_pretty(&blockchain_data).unwrap()).unwrap();
+    
+    // Try to load the tampered blockchain - should fail validation
+    let result = Blockchain::load_from_file(&test_path);
+    assert!(result.is_err(), "Expected tampered blockchain to fail validation");
+    
+    // Clean up
+    fs::remove_file(&test_path).ok();
+}
+
+#[test]
+fn test_blockchain_persistence_with_multiple_blocks() {
+    let test_path = PathBuf::from("test_blockchain_multi.json");
+    
+    // Clean up any existing test file
+    let _ = fs::remove_file(&test_path);
+    
+    // Create blockchain with multiple blocks
+    let mut blockchain = Blockchain::new(2);
+    for i in 0..5 {
+        let tx = Transaction::new(format!("player{}", i), i as u8, i as u8, 0);
+        blockchain.add_transaction(tx);
+        blockchain.mine_pending_transactions(&format!("miner{}", i));
+    }
+    
+    let original_length = blockchain.chain.len();
+    
+    // Save and reload
+    blockchain.save_to_file(&test_path).expect("Failed to save blockchain");
+    let loaded = Blockchain::load_from_file(&test_path).expect("Failed to load blockchain");
+    
+    assert_eq!(loaded.chain.len(), original_length);
+    assert!(loaded.is_chain_valid());
+    
+    // Verify each block
+    for i in 0..original_length {
+        assert_eq!(loaded.chain[i].index, blockchain.chain[i].index);
+        assert_eq!(loaded.chain[i].hash, blockchain.chain[i].hash);
+        assert_eq!(loaded.chain[i].previous_hash, blockchain.chain[i].previous_hash);
+    }
+    
+    // Clean up
+    fs::remove_file(&test_path).ok();
 }

@@ -2,6 +2,7 @@ use crate::blockchain::{Blockchain, Transaction};
 use crate::game::{Grid, Player, Ship, HitReport};
 use crate::crypto::{verify_commitment, HitProof};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Coordinates the entire game including blockchain and game state
 pub struct GameCoordinator {
@@ -9,6 +10,7 @@ pub struct GameCoordinator {
     pub grid: Grid,
     pub players: HashMap<String, Player>,
     pub round: u32,
+    blockchain_path: Option<PathBuf>,
 }
 
 impl GameCoordinator {
@@ -18,7 +20,57 @@ impl GameCoordinator {
             grid: Grid::new(grid_size),
             players: HashMap::new(),
             round: 0,
+            blockchain_path: None,
         }
+    }
+
+    /// Create a new GameCoordinator with blockchain persistence
+    pub fn with_persistence(grid_size: u8, mining_difficulty: usize, blockchain_path: PathBuf) -> Self {
+        let blockchain = if Blockchain::file_exists(&blockchain_path) {
+            println!("Loading existing blockchain from {:?}...", blockchain_path);
+            match Blockchain::load_from_file(&blockchain_path) {
+                Ok(bc) => {
+                    println!("✓ Loaded blockchain with {} blocks", bc.chain.len());
+                    bc
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to load blockchain: {}", e);
+                    eprintln!("  Creating new blockchain instead");
+                    Blockchain::new(mining_difficulty)
+                }
+            }
+        } else {
+            println!("No existing blockchain found, creating new one");
+            Blockchain::new(mining_difficulty)
+        };
+
+        let coordinator = Self {
+            blockchain,
+            grid: Grid::new(grid_size),
+            players: HashMap::new(),
+            round: 0,
+            blockchain_path: Some(blockchain_path),
+        };
+
+        // Save the initial blockchain to disk
+        if let Err(e) = coordinator.save_blockchain() {
+            eprintln!("Warning: Failed to save initial blockchain: {}", e);
+        }
+
+        coordinator
+    }
+
+    /// Save the blockchain to disk if persistence is enabled
+    fn save_blockchain(&self) -> Result<(), String> {
+        if let Some(path) = &self.blockchain_path {
+            self.blockchain.save_to_file(path)?;
+        }
+        Ok(())
+    }
+
+    /// Manually save the blockchain (public method for external use)
+    pub fn save(&self) -> Result<(), String> {
+        self.save_blockchain()
     }
 
     /// Register a new player with their fleet
@@ -129,6 +181,11 @@ impl GameCoordinator {
             player.add_shots(shots_earned);
         }
 
+        // Auto-save blockchain after mining
+        if let Err(e) = self.save_blockchain() {
+            eprintln!("Warning: Failed to save blockchain: {}", e);
+        }
+
         Ok(shots_earned)
     }
 
@@ -148,6 +205,11 @@ impl GameCoordinator {
         // Create transaction
         let transaction = Transaction::new(player_id, target_x, target_y, 0);
         self.blockchain.add_transaction(transaction);
+
+        // Auto-save blockchain after adding transaction
+        if let Err(e) = self.save_blockchain() {
+            eprintln!("Warning: Failed to save blockchain: {}", e);
+        }
 
         Ok(())
     }

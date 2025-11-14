@@ -2,6 +2,8 @@ use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
 use chrono::Utc;
 use std::fmt;
+use std::fs;
+use std::path::Path;
 
 /// Represents a transaction in the blockchain (a shot fired by a player)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,5 +169,37 @@ impl Blockchain {
 
     pub fn get_transaction_count(&self) -> usize {
         self.chain.iter().map(|block| block.transactions.len()).sum()
+    }
+
+    /// Save the blockchain to a JSON file
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize blockchain: {}", e))?;
+        
+        fs::write(path, json)
+            .map_err(|e| format!("Failed to write blockchain file: {}", e))?;
+        
+        Ok(())
+    }
+
+    /// Load the blockchain from a JSON file
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        let json = fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read blockchain file: {}", e))?;
+        
+        let blockchain: Blockchain = serde_json::from_str(&json)
+            .map_err(|e| format!("Failed to deserialize blockchain: {}", e))?;
+        
+        // Verify the loaded blockchain is valid
+        if !blockchain.is_chain_valid() {
+            return Err("Loaded blockchain is invalid".to_string());
+        }
+        
+        Ok(blockchain)
+    }
+
+    /// Check if a blockchain file exists
+    pub fn file_exists<P: AsRef<Path>>(path: P) -> bool {
+        path.as_ref().exists()
     }
 }

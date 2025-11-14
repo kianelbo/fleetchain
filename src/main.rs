@@ -8,6 +8,7 @@ mod api;
 use clap::Parser;
 use network::{NetworkNode, Peer};
 use std::sync::Arc;
+use std::path::PathBuf;
 
 /// FleetChain: Distributed Blockchain Battleship
 #[derive(Parser, Debug)]
@@ -36,6 +37,10 @@ struct Args {
     /// Run in demo mode (single node with test game)
     #[arg(long)]
     demo: bool,
+
+    /// Path to blockchain data file (default: ./data/{node_id}_blockchain.json)
+    #[arg(long)]
+    blockchain_path: Option<String>,
 }
 
 #[tokio::main]
@@ -48,12 +53,28 @@ async fn main() {
     println!("Grid Size: {}x{}", args.grid_size, args.grid_size);
     println!("Mining Difficulty: {}\n", args.difficulty);
 
-    // Create network node
-    let node = Arc::new(NetworkNode::new(
+    // Determine blockchain path
+    let blockchain_path = if let Some(path) = args.blockchain_path {
+        PathBuf::from(path)
+    } else {
+        // Create data directory if it doesn't exist
+        let data_dir = PathBuf::from("./data");
+        if !data_dir.exists() {
+            std::fs::create_dir_all(&data_dir)
+                .expect("Failed to create data directory");
+        }
+        data_dir.join(format!("{}_blockchain.json", args.node_id))
+    };
+
+    println!("Blockchain file: {:?}\n", blockchain_path);
+
+    // Create network node with persistence
+    let node = Arc::new(NetworkNode::with_persistence(
         args.node_id.clone(),
         args.port,
         args.grid_size,
         args.difficulty,
+        blockchain_path,
     ));
 
     // Connect to peers

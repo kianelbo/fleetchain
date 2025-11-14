@@ -83,6 +83,11 @@ async fn receive_block(
     coordinator.blockchain.chain.push(block);
     coordinator.blockchain.pending_transactions.clear();
 
+    // Save blockchain after receiving new block
+    if let Err(e) = coordinator.save() {
+        eprintln!("Warning: Failed to save blockchain after receiving block: {}", e);
+    }
+
     (
         StatusCode::OK,
         Json(ApiResponse::success("Block accepted".to_string())),
@@ -96,6 +101,11 @@ async fn receive_transaction(
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let mut coordinator = node.coordinator.write().await;
     coordinator.blockchain.add_transaction(transaction);
+
+    // Save blockchain after receiving new transaction
+    if let Err(e) = coordinator.save() {
+        eprintln!("Warning: Failed to save blockchain after receiving transaction: {}", e);
+    }
 
     (
         StatusCode::OK,

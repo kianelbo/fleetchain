@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use serde::{Serialize, Deserialize};
+use std::path::PathBuf;
 use crate::blockchain::{Block, Transaction, Blockchain};
 use crate::coordinator::GameCoordinator;
 
@@ -35,6 +36,24 @@ impl NetworkNode {
         Self {
             peers: Arc::new(RwLock::new(HashSet::new())),
             coordinator: Arc::new(RwLock::new(GameCoordinator::new(grid_size, difficulty))),
+            node_id,
+            port,
+        }
+    }
+
+    /// Create a new NetworkNode with blockchain persistence
+    pub fn with_persistence(
+        node_id: String,
+        port: u16,
+        grid_size: u8,
+        difficulty: usize,
+        blockchain_path: PathBuf,
+    ) -> Self {
+        Self {
+            peers: Arc::new(RwLock::new(HashSet::new())),
+            coordinator: Arc::new(RwLock::new(
+                GameCoordinator::with_persistence(grid_size, difficulty, blockchain_path)
+            )),
             node_id,
             port,
         }
@@ -117,6 +136,11 @@ impl NetworkNode {
             && peer_blockchain.is_chain_valid() {
             coordinator.blockchain = peer_blockchain;
             println!("✓ Synchronized blockchain from peer {}", peer.url());
+            
+            // Save the synchronized blockchain
+            if let Err(e) = coordinator.save() {
+                eprintln!("Warning: Failed to save synchronized blockchain: {}", e);
+            }
         }
 
         Ok(())
