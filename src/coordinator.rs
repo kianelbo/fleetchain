@@ -120,6 +120,10 @@ impl GameCoordinator {
 
         // Create player
         let player = Player::new(player_id.clone(), ships, board_commitment, salt);
+
+        // Award an initial registration shot (UTXO) to the player
+        self.blockchain.award_registration_shot(&player_id);
+
         self.players.insert(player_id, player);
 
         Ok(())
@@ -162,7 +166,7 @@ impl GameCoordinator {
         false // Neither horizontal nor vertical
     }
 
-    /// Allow a player to mine for shots
+    /// Allow a player to mine for shots (shots are tracked as UTXOs on-chain)
     pub fn mine_for_shots(&mut self, player_id: &str) -> Result<u32, String> {
         if !self.players.contains_key(player_id) {
             return Err("Player not found".to_string());
@@ -173,13 +177,8 @@ impl GameCoordinator {
             return Err("Defeated players cannot mine".to_string());
         }
 
-        // Mine pending transactions
+        // Mine pending transactions and create shot UTXOs for the miner
         let shots_earned = self.blockchain.mine_pending_transactions(player_id);
-
-        // Award shots to the miner
-        if let Some(player) = self.players.get_mut(player_id) {
-            player.add_shots(shots_earned);
-        }
 
         // Auto-save blockchain after mining
         if let Err(e) = self.save_blockchain() {
@@ -189,20 +188,32 @@ impl GameCoordinator {
         Ok(shots_earned)
     }
 
-    /// Fire a shot (creates a transaction)
+    /// Fire a shot (spends a shot UTXO and creates a transaction)
     pub fn fire_shot(
         &mut self,
         player_id: String,
         target_x: u8,
         target_y: u8,
     ) -> Result<(), String> {
-        // Check if player has shots available
-        let player = self.players.get_mut(&player_id)
-            .ok_or("Player not found")?;
+        // Ensure player exists
+        if !self.players.contains_key(&player_id) {
+            return Err("Player not found".to_string());
+        }
 
-        player.fire_shot(target_x, target_y)?;
+        // Check if player is defeated
+        if self.is_player_defeated(&player_id) {
+            return Err("Defeated players cannot fire shots".to_string());
+        }
 
-        // Create transaction
+        // Spend one shot UTXO on-chain
+        self.blockchain.consume_shot(&player_id)?;
+
+        // Record shot locally for the player (for stats / UI)
+        if let Some(player) = self.players.get_mut(&player_id) {
+            player.shots_fired.push((target_x, target_y));
+        }
+
+        // Create transaction representing the shot
         let transaction = Transaction::new(player_id, target_x, target_y, 0);
         self.blockchain.add_transaction(transaction);
 

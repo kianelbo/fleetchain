@@ -69,7 +69,7 @@ src/
 ### Game Module
 - **Grid**: Shared grid where ships are placed
 - **Ship**: Ship with positions and hit tracking
-- **Player**: Player state including ships, commitments, and shots
+- **Player**: Player state including ships and commitments (shot availability is enforced on-chain)
 - **HitReport**: Report with ZK proof for verification
 
 ### Crypto Module
@@ -162,6 +162,12 @@ Once a node is running, you can interact with it via HTTP:
     "player_id": "player1"
   }
   ```
+ - `POST /api/shots` - Get current unspent shots (UTXO-based) for a player
+   ```json
+   {
+     "player_id": "player1"
+   }
+   ```
 
 #### Network Endpoints
 - `GET /api/peers` - Get all connected peers

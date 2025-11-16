@@ -5,6 +5,19 @@ use std::fmt;
 use std::fs;
 use std::path::Path;
 
+/// Represents an unspent transaction output (UTXO) for a single shot
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShotUtxo {
+    /// Unique identifier for this UTXO
+    pub id: String,
+    /// Owner (player ID) who can spend this shot
+    pub owner: String,
+    /// Index of the block in which this UTXO was created
+    pub created_in_block: u64,
+    /// Whether this UTXO has been spent
+    pub spent: bool,
+}
+
 /// Represents a transaction in the blockchain (a shot fired by a player)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
@@ -104,6 +117,8 @@ pub struct Blockchain {
     pub difficulty: usize,
     pub pending_transactions: Vec<Transaction>,
     pub mining_reward: u32,
+    /// UTXO set representing unspent shot rewards
+    pub shot_utxos: Vec<ShotUtxo>,
 }
 
 impl Blockchain {
@@ -113,6 +128,7 @@ impl Blockchain {
             difficulty,
             pending_transactions: Vec::new(),
             mining_reward: 1,
+            shot_utxos: Vec::new(),
         };
         blockchain.create_genesis_block();
         blockchain
@@ -131,17 +147,34 @@ impl Blockchain {
         self.pending_transactions.push(transaction);
     }
 
-    /// Mine pending transactions and reward the miner with shots
-    pub fn mine_pending_transactions(&mut self, _miner_address: &str) -> u32 {
+    /// Mine pending transactions and reward the miner with shot UTXOs
+    pub fn mine_pending_transactions(&mut self, miner_address: &str) -> u32 {
+        let next_index = self.chain.len() as u64;
         let mut block = Block::new(
-            self.chain.len() as u64,
+            next_index,
             self.pending_transactions.clone(),
             self.get_latest_block().hash.clone(),
         );
 
         block.mine(self.difficulty);
+        let block_hash = block.hash.clone();
         self.chain.push(block);
         self.pending_transactions.clear();
+
+        // Create shot UTXOs for the miner
+        for i in 0..self.mining_reward {
+            let utxo_id_input = format!("{}:{}:{}", miner_address, block_hash, i);
+            let mut hasher = Sha256::new();
+            hasher.update(utxo_id_input.as_bytes());
+            let id = hex::encode(hasher.finalize());
+
+            self.shot_utxos.push(ShotUtxo {
+                id,
+                owner: miner_address.to_string(),
+                created_in_block: next_index,
+                spent: false,
+            });
+        }
 
         // Return the number of shots earned
         self.mining_reward
@@ -171,14 +204,52 @@ impl Blockchain {
         self.chain.iter().map(|block| block.transactions.len()).sum()
     }
 
+    /// Get the number of unspent shot UTXOs for a given player
+    pub fn get_unspent_shots(&self, player_id: &str) -> usize {
+        self.shot_utxos
+            .iter()
+            .filter(|u| u.owner == player_id && !u.spent)
+            .count()
+    }
+
+    /// Consume a single shot UTXO for the given player
+    pub fn consume_shot(&mut self, player_id: &str) -> Result<(), String> {
+        if let Some(utxo) = self
+            .shot_utxos
+            .iter_mut()
+            .find(|u| u.owner == player_id && !u.spent)
+        {
+            utxo.spent = true;
+            Ok(())
+        } else {
+            Err("No unspent shot UTXOs available".to_string())
+        }
+    }
+
+    /// Award a single registration shot UTXO to a player
+    pub fn award_registration_shot(&mut self, player_id: &str) {
+        let latest_block = self.get_latest_block();
+        let utxo_id_input = format!("{}:{}:registration", player_id, latest_block.hash);
+        let mut hasher = Sha256::new();
+        hasher.update(utxo_id_input.as_bytes());
+        let id = hex::encode(hasher.finalize());
+
+        self.shot_utxos.push(ShotUtxo {
+            id,
+            owner: player_id.to_string(),
+            created_in_block: latest_block.index,
+            spent: false,
+        });
+    }
+
     /// Save the blockchain to a JSON file
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<(), String> {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize blockchain: {}", e))?;
-        
+
         fs::write(path, json)
             .map_err(|e| format!("Failed to write blockchain file: {}", e))?;
-        
+
         Ok(())
     }
 
@@ -186,15 +257,15 @@ impl Blockchain {
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let json = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read blockchain file: {}", e))?;
-        
+
         let blockchain: Blockchain = serde_json::from_str(&json)
             .map_err(|e| format!("Failed to deserialize blockchain: {}", e))?;
-        
+
         // Verify the loaded blockchain is valid
         if !blockchain.is_chain_valid() {
             return Err("Loaded blockchain is invalid".to_string());
         }
-        
+
         Ok(blockchain)
     }
 

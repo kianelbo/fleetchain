@@ -87,7 +87,7 @@ pub struct Player {
     pub board_commitment: String,
     #[allow(dead_code)]
     pub salt: String,
-    pub shots_available: u32,
+    /// Local log of shots fired by this player (shot availability is enforced on-chain)
     pub shots_fired: Vec<(u8, u8)>,
 }
 
@@ -98,22 +98,8 @@ impl Player {
             ships,
             board_commitment,
             salt,
-            shots_available: 0,
             shots_fired: Vec::new(),
         }
-    }
-
-    pub fn add_shots(&mut self, count: u32) {
-        self.shots_available += count;
-    }
-
-    pub fn fire_shot(&mut self, x: u8, y: u8) -> Result<(), String> {
-        if self.shots_available == 0 {
-            return Err("No shots available".to_string());
-        }
-        self.shots_available -= 1;
-        self.shots_fired.push((x, y));
-        Ok(())
     }
 
     #[allow(dead_code)]

@@ -203,25 +203,48 @@ async fn test_fire_shot_without_shots() {
 
     let app = create_router(node.clone());
 
-    let fire_req = FireShotRequest {
+    // First fire should succeed because registration grants 1 shot UTXO
+    let fire_req1 = FireShotRequest {
         player_id: "player1".to_string(),
         target_x: 5,
         target_y: 5,
     };
 
-    let response = app
+    let response1 = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/api/fire")
                 .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&fire_req).unwrap()))
+                .body(Body::from(serde_json::to_string(&fire_req1).unwrap()))
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response1.status(), StatusCode::OK);
+
+    // Second fire without mining should fail (no UTXOs left)
+    let fire_req2 = FireShotRequest {
+        player_id: "player1".to_string(),
+        target_x: 6,
+        target_y: 6,
+    };
+
+    let response2 = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/fire")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&fire_req2).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response2.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

@@ -110,9 +110,9 @@ fn test_mine_for_shots() {
     
     let shots = coordinator.mine_for_shots("player1").unwrap();
     assert!(shots > 0);
-    
-    let player = coordinator.players.get("player1").unwrap();
-    assert_eq!(player.shots_available, shots);
+
+    // Registration awards 1 shot, mining adds `shots` more
+    assert_eq!(coordinator.blockchain.get_unspent_shots("player1"), (1 + shots) as usize);
 }
 
 #[test]
@@ -140,15 +140,23 @@ fn test_fire_shot() {
         salt,
     ).unwrap();
     
-    // Mine to get shots
-    coordinator.mine_for_shots("player1").unwrap();
-    
-    // Fire shot
+    // After registration, player already has 1 shot UTXO
+    assert_eq!(coordinator.blockchain.get_unspent_shots("player1"), 1);
+
+    // Mine to get additional shots (creates UTXOs)
+    let mined = coordinator.mine_for_shots("player1").unwrap();
+    assert!(mined > 0);
+
+    // Fire shot (spends one UTXO)
     let result = coordinator.fire_shot("player1".to_string(), 5, 5);
     assert!(result.is_ok());
-    
+
     // Check transaction was added
     assert_eq!(coordinator.blockchain.pending_transactions.len(), 1);
+
+    // Player should now have registration + mined - 1 remaining
+    let remaining = coordinator.blockchain.get_unspent_shots("player1");
+    assert_eq!(remaining as u32, 1 + mined - 1);
 }
 
 #[test]
@@ -168,9 +176,12 @@ fn test_fire_shot_without_shots() {
         commitment,
         salt,
     ).unwrap();
-    
-    // Try to fire without mining
-    let result = coordinator.fire_shot("player1".to_string(), 5, 5);
+
+    // Registration grants 1 shot: first fire should succeed
+    assert!(coordinator.fire_shot("player1".to_string(), 5, 5).is_ok());
+
+    // Second fire without mining should fail (no UTXOs left)
+    let result = coordinator.fire_shot("player1".to_string(), 6, 6);
     assert!(result.is_err());
 }
 
@@ -335,7 +346,7 @@ fn test_pending_transactions_cleared_after_mining() {
     
     coordinator.register_player("player1".to_string(), ships, commitment, salt).unwrap();
     
-    // Mine to get initial shots
+    // Mine to get additional shots (registration already granted 1)
     coordinator.mine_for_shots("player1").unwrap();
     coordinator.mine_for_shots("player1").unwrap();
     coordinator.mine_for_shots("player1").unwrap();
@@ -402,10 +413,10 @@ fn test_concurrent_players_mining() {
     // Both players mine
     coordinator.mine_for_shots("player0").unwrap();
     coordinator.mine_for_shots("player1").unwrap();
-    
-    // Both should have shots
-    assert!(coordinator.players.get("player0").unwrap().shots_available > 0);
-    assert!(coordinator.players.get("player1").unwrap().shots_available > 0);
+
+    // Both should have UTXO-backed shots
+    assert!(coordinator.blockchain.get_unspent_shots("player0") > 0);
+    assert!(coordinator.blockchain.get_unspent_shots("player1") > 0);
 }
 
 #[test]
@@ -649,4 +660,59 @@ fn test_large_scale_game() {
     let stats = coordinator.get_stats();
     assert_eq!(stats.total_players, 10);
     assert_eq!(stats.total_shots, 10);
+}
+
+#[test]
+fn test_registration_awards_initial_shot_utxo() {
+    let mut coordinator = GameCoordinator::new(10, 2);
+
+    let ships = create_valid_fleet();
+    let positions: Vec<(u8, u8)> = ships.iter()
+        .flat_map(|s| s.positions.clone())
+        .collect();
+    let salt = generate_salt();
+    let commitment = create_commitment(&positions, &salt);
+
+    coordinator.register_player(
+        "player1".to_string(),
+        ships,
+        commitment,
+        salt,
+    ).unwrap();
+
+    assert_eq!(coordinator.blockchain.get_unspent_shots("player1"), 1);
+}
+
+#[test]
+fn test_utxo_lifecycle_registration_mining_and_firing() {
+    let mut coordinator = GameCoordinator::new(10, 2);
+
+    let ships = create_valid_fleet();
+    let positions: Vec<(u8, u8)> = ships.iter()
+        .flat_map(|s| s.positions.clone())
+        .collect();
+    let salt = generate_salt();
+    let commitment = create_commitment(&positions, &salt);
+
+    coordinator.register_player(
+        "player1".to_string(),
+        ships,
+        commitment,
+        salt,
+    ).unwrap();
+
+    // After registration
+    assert_eq!(coordinator.blockchain.get_unspent_shots("player1"), 1);
+
+    // Mine for additional shots
+    let mined = coordinator.mine_for_shots("player1").unwrap();
+    assert!(mined > 0);
+
+    let total_after_mine = coordinator.blockchain.get_unspent_shots("player1");
+    assert_eq!(total_after_mine as u32, 1 + mined);
+
+    // Fire one shot
+    coordinator.fire_shot("player1".to_string(), 3, 3).unwrap();
+    let total_after_fire = coordinator.blockchain.get_unspent_shots("player1");
+    assert_eq!(total_after_fire as u32, 1 + mined - 1);
 }

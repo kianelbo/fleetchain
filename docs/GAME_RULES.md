@@ -65,7 +65,7 @@ Players must **mine** to earn shots. Mining involves:
 1. Request to mine
 2. Solve a proof-of-work puzzle (find a nonce where block hash starts with N zeros)
 3. Successfully mine a block
-4. Receive mining reward (default: 1 shot per block)
+4. Receive mining reward (default: 1 shot **UTXO** per block)
 
 **Mining Difficulty**: Configured at game start (2-6 leading zeros typical)
 
@@ -104,6 +104,12 @@ To fire a shot:
   "nonce": 0
 }
 ```
+
+**Shot Accounting (UTXOs)**:
+- Each mined block grants one or more **shot UTXOs** to the miner.
+- Each fired shot **consumes exactly one unspent shot UTXO**.
+- A player **cannot fire** if they have no unspent shot UTXOs.
+- Nodes can expose an API (e.g. `/api/shots`) to query the current unspent shot count for a player.
 
 ### Shot Resolution
 

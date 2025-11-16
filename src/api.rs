@@ -9,8 +9,15 @@ use tower_http::cors::CorsLayer;
 
 use crate::blockchain::{Block, Transaction};
 use crate::network::{
-    NetworkNode, RegisterPlayerRequest, FireShotRequest, MineRequest,
-    ApiResponse, Peer, BlockchainInfo, NodeInfo,
+    NetworkNode,
+    RegisterPlayerRequest,
+    FireShotRequest,
+    MineRequest,
+    ShotBalanceRequest,
+    ApiResponse,
+    Peer,
+    BlockchainInfo,
+    NodeInfo,
 };
 
 /// Application state shared across handlers
@@ -23,21 +30,22 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/blockchain", get(get_blockchain))
         .route("/api/block", post(receive_block))
         .route("/api/transaction", post(receive_transaction))
-        
+    
         // Game endpoints
         .route("/api/register", post(register_player))
         .route("/api/fire", post(fire_shot))
         .route("/api/mine", post(mine_for_shots))
-        
+        .route("/api/shots", post(get_shot_balance))
+
         // Network endpoints
         .route("/api/peers", get(get_peers))
         .route("/api/peers", post(add_peer))
         .route("/api/sync", post(sync_blockchain))
-        
+
         // Info endpoints
         .route("/api/info", get(get_node_info))
         .route("/api/stats", get(get_game_stats))
-        
+
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -135,6 +143,28 @@ async fn register_player(
             Json(ApiResponse::error(e)),
         ),
     }
+}
+
+/// Get current unspent shots (UTXO-based) for a player
+async fn get_shot_balance(
+    State(node): State<AppState>,
+    Json(req): Json<ShotBalanceRequest>,
+) -> (StatusCode, Json<ApiResponse<u32>>) {
+    let coordinator = node.coordinator.read().await;
+
+    if !coordinator.players.contains_key(&req.player_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Player not found".to_string())),
+        );
+    }
+
+    let count = coordinator.blockchain.get_unspent_shots(&req.player_id) as u32;
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success(count)),
+    )
 }
 
 /// Fire a shot

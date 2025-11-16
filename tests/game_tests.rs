@@ -99,63 +99,12 @@ fn test_player_creation() {
         .flat_map(|s| s.positions.clone())
         .collect();
     let commitment = create_commitment(&positions, &salt);
-    
+
     let player = Player::new("player1".to_string(), ships, commitment.clone(), salt.clone());
-    
+
     assert_eq!(player.id, "player1");
     assert_eq!(player.ships.len(), 1);
-    assert_eq!(player.shots_available, 0);
     assert_eq!(player.board_commitment, commitment);
-}
-
-#[test]
-fn test_player_add_shots() {
-    let ships = vec![Ship::new("carrier".to_string(), vec![(0, 0)])];
-    let salt = generate_salt();
-    let positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|s| s.positions.clone())
-        .collect();
-    let commitment = create_commitment(&positions, &salt);
-    
-    let mut player = Player::new("player1".to_string(), ships, commitment, salt);
-    
-    assert_eq!(player.shots_available, 0);
-    player.add_shots(5);
-    assert_eq!(player.shots_available, 5);
-}
-
-#[test]
-fn test_player_fire_shot() {
-    let ships = vec![Ship::new("carrier".to_string(), vec![(0, 0)])];
-    let salt = generate_salt();
-    let positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|s| s.positions.clone())
-        .collect();
-    let commitment = create_commitment(&positions, &salt);
-    
-    let mut player = Player::new("player1".to_string(), ships, commitment, salt);
-    player.add_shots(3);
-    
-    assert!(player.fire_shot(5, 5).is_ok());
-    assert_eq!(player.shots_available, 2);
-    assert_eq!(player.shots_fired.len(), 1);
-    assert_eq!(player.shots_fired[0], (5, 5));
-}
-
-#[test]
-fn test_player_fire_without_shots() {
-    let ships = vec![Ship::new("carrier".to_string(), vec![(0, 0)])];
-    let salt = generate_salt();
-    let positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|s| s.positions.clone())
-        .collect();
-    let commitment = create_commitment(&positions, &salt);
-    
-    let mut player = Player::new("player1".to_string(), ships, commitment, salt);
-    
-    let result = player.fire_shot(5, 5);
-    assert!(result.is_err());
-    assert_eq!(result.unwrap_err(), "No shots available");
 }
 
 #[test]
@@ -262,22 +211,3 @@ fn test_ship_with_single_cell() {
     assert!(!ship.is_sunk());
 }
 
-#[test]
-fn test_player_multiple_shots() {
-    let ships = vec![Ship::new("carrier".to_string(), vec![(0, 0)])];
-    let salt = generate_salt();
-    let positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|s| s.positions.clone())
-        .collect();
-    let commitment = create_commitment(&positions, &salt);
-    
-    let mut player = Player::new("player1".to_string(), ships, commitment, salt);
-    player.add_shots(10);
-    
-    for i in 0..10 {
-        assert!(player.fire_shot(i, i).is_ok());
-    }
-    
-    assert_eq!(player.shots_fired.len(), 10);
-    assert_eq!(player.shots_available, 0);
-}

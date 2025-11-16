@@ -121,6 +121,7 @@ async fn main() {
     println!("  POST /api/register       - Register player");
     println!("  POST /api/fire           - Fire shot");
     println!("  POST /api/mine           - Mine for shots");
+    println!("  POST /api/shots          - Get shot balance");
     println!("  POST /api/peers          - Add peer");
     println!("  POST /api/sync           - Sync blockchain\n");
 

@@ -181,6 +181,29 @@ fn test_get_transaction_count() {
 }
 
 #[test]
+fn test_registration_awards_shot_utxo() {
+    let mut blockchain = Blockchain::new(2);
+    assert_eq!(blockchain.get_unspent_shots("player1"), 0);
+
+    blockchain.award_registration_shot("player1");
+
+    assert_eq!(blockchain.get_unspent_shots("player1"), 1);
+}
+
+#[test]
+fn test_consume_shot_utxo() {
+    let mut blockchain = Blockchain::new(2);
+    blockchain.award_registration_shot("player1");
+    assert_eq!(blockchain.get_unspent_shots("player1"), 1);
+
+    blockchain.consume_shot("player1").unwrap();
+    assert_eq!(blockchain.get_unspent_shots("player1"), 0);
+
+    // Consuming again should fail
+    assert!(blockchain.consume_shot("player1").is_err());
+}
+
+#[test]
 fn test_empty_block_mining() {
     let mut blockchain = Blockchain::new(2);
     blockchain.mine_pending_transactions("miner1");
