@@ -1,6 +1,6 @@
 use fleetchain::network::{NetworkNode, Peer};
 use fleetchain::game::Ship;
-use fleetchain::crypto::{generate_salt, create_commitment};
+mod common;
 use fleetchain::blockchain::Transaction;
 
 // Helper function to create a valid 4-ship fleet
@@ -134,19 +134,9 @@ async fn test_node_with_game_state() {
     let node = NetworkNode::new("node1".to_string(), 8080, 10, 2);
     
     let ships = create_valid_fleet();
-    let positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|s| s.positions.clone())
-        .collect();
-    let salt = generate_salt();
-    let commitment = create_commitment(&positions, &salt);
     
     let mut coordinator = node.coordinator.write().await;
-    let result = coordinator.register_player(
-        "player1".to_string(),
-        ships,
-        commitment,
-        salt,
-    );
+    let result = common::register(&mut coordinator, &"player1".to_string(), &ships);
     
     assert!(result.is_ok());
     assert_eq!(coordinator.players.len(), 1);
@@ -157,14 +147,9 @@ async fn test_node_mining() {
     let node = NetworkNode::new("node1".to_string(), 8080, 10, 2);
     
     let ships = create_valid_fleet();
-    let positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|s| s.positions.clone())
-        .collect();
-    let salt = generate_salt();
-    let commitment = create_commitment(&positions, &salt);
     
     let mut coordinator = node.coordinator.write().await;
-    coordinator.register_player("player1".to_string(), ships, commitment, salt).unwrap();
+    common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
     
     let initial_length = coordinator.blockchain.chain.len();
     coordinator.mine_for_shots("player1").unwrap();
@@ -177,14 +162,9 @@ async fn test_node_transaction_handling() {
     let node = NetworkNode::new("node1".to_string(), 8080, 10, 2);
     
     let ships = create_valid_fleet();
-    let positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|s| s.positions.clone())
-        .collect();
-    let salt = generate_salt();
-    let commitment = create_commitment(&positions, &salt);
     
     let mut coordinator = node.coordinator.write().await;
-    coordinator.register_player("player1".to_string(), ships, commitment, salt).unwrap();
+    common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
     coordinator.mine_for_shots("player1").unwrap();
     
     coordinator.fire_shot("player1".to_string(), 5, 5).unwrap();
@@ -199,14 +179,9 @@ async fn test_multiple_nodes_independent_state() {
     
     // Register player on node1
     let ships = create_valid_fleet();
-    let positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|s| s.positions.clone())
-        .collect();
-    let salt = generate_salt();
-    let commitment = create_commitment(&positions, &salt);
     
     let mut coordinator1 = node1.coordinator.write().await;
-    coordinator1.register_player("player1".to_string(), ships, commitment, salt).unwrap();
+    common::register(&mut coordinator1, &"player1".to_string(), &ships).unwrap();
     drop(coordinator1);
     
     // Node2 should have no players

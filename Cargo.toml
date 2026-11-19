@@ -24,3 +24,11 @@ tower = "0.5"
 tower-http = { version = "0.5", features = ["cors"] }
 reqwest = { version = "0.11", features = ["json"] }
 clap = { version = "4.4", features = ["derive"] }
+
+# Groth16 proving over BLS12-381 is unusably slow without optimisation, and the
+# generic prover code is compiled into this crate, so optimise it too.
+[profile.dev]
+opt-level = 3
+
+[profile.test]
+opt-level = 3

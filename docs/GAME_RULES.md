@@ -38,23 +38,23 @@ Destroyer: (6,0)                        # 1 cell
 ```
 
 ### Step 2: Create Commitment
-Players create a cryptographic commitment to their ship positions:
+Your client creates a cryptographic commitment to your fleet:
 
-1. Collect all ship positions
-2. Generate a random salt (32 bytes)
-3. Compute: `commitment = SHA256(positions || salt)`
-4. Submit commitment to the game (salt remains secret)
+1. Your ship positions stay **on your machine**
+2. A fresh random salt is generated
+3. Your client computes `commitment = Poseidon(salt, fleet cells)`
 
-**Important**: The commitment binds you to these positions. You cannot change them later!
+**Important**: The commitment binds you to these positions. You cannot change them later.
 
 ### Step 3: Register
 Submit your registration with:
 - Player ID
-- Ships (positions)
-- Commitment hash
-- Salt (kept private, verified later)
+- The commitment
+- A zero-knowledge proof that the commitment hides a legal fleet (one ship of each
+  length 4, 3, 2, 1, each a straight line, all inside the board)
 
-The game verifies your commitment matches your ships before accepting registration.
+Your positions and salt are **never sent**. The game verifies the proof before accepting
+registration, and rejects duplicate IDs and copied commitments.
 
 ## Mining Phase
 
@@ -113,47 +113,41 @@ To fire a shot:
 
 ### Shot Resolution
 
-After a shot is mined into the blockchain:
-
-1. All players at the target coordinates are notified
-2. Each affected player must report hit/miss
-3. Reports must include zero-knowledge proofs
+Every fired shot is appended to a public, ordered shot log. Since nobody can see who has ships
+on a cell, **every other living player must answer every shot**, in order, with a
+zero-knowledge proof. Overlapping ships (yours or other players') on the shot cell are all hit.
 
 ## Verification Phase
 
 ### Hit Reports
 
-When your ship is targeted, you must report:
+When a shot is fired you work out locally whether it hits a live cell of your fleet, then submit a
+`HitReport` containing:
 
-**For a HIT**:
-1. Confirm the hit
-2. Generate proof revealing the specific hit position
-3. Submit `HitReport` with proof
+- `is_hit`: whether a live ship cell of yours was on that cell
+- `is_alive`: whether any cell of your fleet is still afloat
+- `new_commitment`: a commitment to your fleet *after* the shot (hit cells are marked sunk)
+- `proof`: a Groth16 proof that all of the above is consistent with your current commitment
 
-**For a MISS**:
-1. Confirm the miss
-2. Generate proof WITHOUT revealing ship positions
-3. Submit `HitReport` with proof
+A cell that was already hit no longer counts, so shooting it again is reported as a miss.
 
 ### Zero-Knowledge Proofs
 
-**Hit Proof**:
-- Reveals the specific position that was hit
-- Proves it matches your commitment
-- Doesn't reveal other ship positions
-
-**Miss Proof**:
-- Proves no ship exists at that position
-- Doesn't reveal where your ships actually are
-- Verifies against your original commitment
+The proof reveals only the two bits `is_hit` and `is_alive`. It does **not** reveal where
+your ships are, how many cells you have left, or anything about cells that were not hit.
 
 ### Verification Process
 
 The game verifies each report:
-1. Deserialize the proof
-2. Check proof validity against player's commitment
-3. Accept or reject the report
-4. Update game state if valid
+1. The report must answer your next unanswered shot (shots are answered in order)
+2. The proof is checked against *your current commitment* and the shot's coordinates, which
+   the game takes from its own log
+3. If valid, your commitment is replaced by `new_commitment` and the result is added to the
+   public results ledger
+4. If `is_alive` is false you are out of the game
+
+A deadline can be configured (`--response-timeout-blocks`): a player who leaves a shot
+unanswered for more than that many blocks forfeits. It is off by default.
 
 **Cheating Detection**: Invalid proofs are rejected, preventing false reports.
 
@@ -227,12 +221,6 @@ Balance three activities:
 2. **Attacking**: Eliminate opponents
 3. **Reporting**: Respond to incoming fire
 
-### Timing Strategy
-
-- **Early game**: Focus on mining to build shot reserves
-- **Mid game**: Balance mining and attacking
-- **Late game**: Use accumulated shots aggressively
-
 ### Placement Strategy
 
 **Clustering**:
@@ -259,7 +247,8 @@ Balance three activities:
 - Changing fleet composition mid-game
 - Retroactive strategy changes
 
-**How**: Cryptographic binding to initial positions
+**How**: Poseidon commitment to the fleet, proven legal at registration; every later state is a
+commitment derived from the previous one inside a proof
 
 ### Zero-Knowledge Proofs
 
@@ -268,7 +257,8 @@ Balance three activities:
 - False miss claims
 - Revealing opponent positions
 
-**How**: Cryptographic verification without revealing secrets
+**How**: Groth16 proofs bound to the defender's current commitment. A false answer has no valid
+proof. See `docs/ZK_PROTOCOL.md` for the attack table and caveats
 
 ### Blockchain Immutability
 
@@ -283,9 +273,9 @@ Balance three activities:
 
 ```
 1. SETUP
-   ├─ Place ships
-   ├─ Create commitment
-   └─ Register
+   ├─ Place ships (locally)
+   ├─ Create commitment + legal-fleet proof
+   └─ Register (commitment and proof only)
 
 2. ROUND LOOP
    ├─ MINING PHASE
@@ -301,8 +291,8 @@ Balance three activities:
    │  └─ Shots recorded on blockchain
    │
    └─ VERIFICATION PHASE
-      ├─ Targeted players report hits/misses
-      ├─ Submit zero-knowledge proofs
+      ├─ Every other living player answers each shot, in order
+      ├─ Submit zero-knowledge proofs (hit/alive bits + new commitment)
       └─ Update game state
 
 3. VICTORY
@@ -336,29 +326,6 @@ Balance three activities:
 - Player 3's last ship is sunk
 - **Player 2 wins!**
 
-## Tips for New Players
-
-1. **Mine early**: Build up shot reserves
-2. **Spread ships**: Don't cluster too much
-3. **Track shots**: Remember where you've fired
-4. **Verify proofs**: Always check opponent reports
-5. **Balance resources**: Don't over-mine or over-shoot
-6. **Use blockchain**: Review transaction history for patterns
-
-## Advanced Tactics
-
-### Mining Pools
-Coordinate with allies to mine blocks together (future feature).
-
-### Shot Patterns
-Use systematic patterns (grid search, spiral, random) to maximize coverage.
-
-### Bluffing
-Place ships in unexpected locations to avoid common targeting patterns.
-
-### Endgame
-When few players remain, aggressive shooting often beats conservative mining.
-
 ## Frequently Asked Questions
 
 **Q: Can I change my ship positions after registering?**
@@ -368,7 +335,7 @@ A: No. The cryptographic commitment binds you to your initial positions.
 A: Your proof will fail verification and your report will be rejected.
 
 **Q: Can I see other players' ship positions?**
-A: No, they're hidden by cryptographic commitments until revealed.
+A: No. They are hidden by cryptographic commitments and are never revealed, not even when the game ends. Each shot only reveals one hit/miss bit per player.
 
 **Q: How many shots can I accumulate?**
 A: Unlimited. Mine as much as you want!
@@ -378,12 +345,3 @@ A: Both transactions are recorded. Both players spend a shot.
 
 **Q: Can I mine and shoot in the same turn?**
 A: Yes! You can perform multiple actions per round.
-
-**Q: Is the blockchain stored permanently?**
-A: In this prototype, it's in-memory. Production version would use persistent storage.
-
-## Conclusion
-
-FleetChain combines classic Battleship strategy with blockchain technology and cryptography. Master the balance between mining, combat, and verification to become the ultimate fleet commander!
-
-Good luck, Admiral! ⚓

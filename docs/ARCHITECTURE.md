@@ -1,9 +1,5 @@
 # FleetChain Architecture
 
-## System Overview
-
-FleetChain combines blockchain technology with cryptographic game theory to create a trustless, decentralized Battleship game. The architecture ensures fairness, prevents cheating, and maintains player privacy through cryptographic commitments and zero-knowledge proofs.
-
 ## Core Design Principles
 
 1. **Trustless**: No central authority needed; blockchain provides consensus
@@ -17,7 +13,7 @@ FleetChain combines blockchain technology with cryptographic game theory to crea
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Application Layer                    │
-│              (main.rs, examples, CLI)                   │
+│                 (main.rs, examples, CLI)                │
 └─────────────────────────────────────────────────────────┘
                             │
 ┌─────────────────────────────────────────────────────────┐
@@ -41,7 +37,7 @@ FleetChain combines blockchain technology with cryptographic game theory to crea
                             │
 ┌─────────────────────────────────────────────────────────┐
 │                  Cryptography Layer                     │
-│    (Commitments, ZK Proofs, Hashing, Salt Gen)          │
+│    (Poseidon commitments, Groth16 proofs, SHA-256)       │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -111,28 +107,26 @@ FleetChain combines blockchain technology with cryptographic game theory to crea
   }
   ```
   - Allows multiple players' ships at same coordinates
-  - Tracks which players occupy each cell
+  - In the coordinator only `size` is meaningful: `cells` stays empty, because
+    recording who occupies a cell would reveal every fleet
 
-- **Player**: Player state including ships, shots, and commitments
-  ```rust
-  struct Player {
-      id: String,
-      ships: Vec<Ship>,
-      board_commitment: String,
-      salt: String,
-      shots_available: u32,
-      shots_fired: Vec<(u8, u8)>,
-  }
-  ```
+- **Player**: Client-side view of a fleet (ships, salt). Kept for local use and
+  tests; **the coordinator never receives or stores one.** The coordinator's
+  record of a player is the public `PlayerState` (commitment, alive flag,
+  shots fired, next owed shot).
 
-- **HitReport**: Report with ZK proof for verification
+- **ShotRecord**: entry of the public, ordered shot log (`index`, `shooter`, `x`, `y`, `fired_at_block`)
+- **HitReport**: a defender's answer to one shot
   ```rust
   struct HitReport {
       player_id: String,
+      shot_index: u64,        // must be the defender's next owed shot
       shot_x: u8,
       shot_y: u8,
       is_hit: bool,
-      proof: Vec<u8>,
+      is_alive: bool,
+      new_commitment: String, // hex; commitment to the updated secret state
+      proof: Vec<u8>,         // 192-byte Groth16 proof
   }
   ```
 
@@ -148,31 +142,17 @@ FleetChain combines blockchain technology with cryptographic game theory to crea
 
 **Components**:
 
-- **Commitment Scheme**:
-  ```rust
-  commitment = SHA256(sorted_positions || salt)
-  ```
-  - Binds player to initial ship placement
-  - Prevents retroactive changes
-  - Maintains privacy until reveal
+- **Legacy SHA-256 helpers** (`create_commitment`, `verify_commitment`,
+  `generate_salt`): kept for compatibility, no longer used by the game protocol.
 
-- **Salt Generation**:
-  - Cryptographically secure random 32-byte salt
-  - Prevents rainbow table attacks
-  - Adds entropy to commitments
+The zero-knowledge machinery lives in the `zk` module (`src/zk/`):
 
-- **Zero-Knowledge Proofs** (Simplified):
-  - **HitProof**: Proves hit/miss without revealing other ships
-  - `prove_hit()`: Creates proof for a hit
-  - `prove_miss()`: Creates proof for a miss
-  - `verify_hit()`: Verifies hit claim
-  - `verify_miss()`: Verifies miss claim
+- **`poseidon.rs`**: Poseidon hash over the BLS12-381 scalar field, native and as an R1CS gadget
+- **`circuits.rs`**: `SetupCircuit` (commitment hides a legal in-bounds fleet) and `ShotCircuit` (hit/alive bits + state transition)
+- **`client.rs`**: `FleetSecret`, the player's private fleet; creates registration and shot proofs
+- **`mod.rs`**: `ZkSystem` (proving + verifying keys), `Verifier` (checks proofs)
 
-**Key Features**:
-- SHA-256 based commitments
-- Secure random salt generation
-- ZK proof framework (simplified for prototype)
-- Commitment verification
+See [ZK_PROTOCOL.md](ZK_PROTOCOL.md) for the full protocol, attack table and caveats.
 
 ### 4. Coordinator Module (`coordinator.rs`)
 
@@ -191,18 +171,20 @@ FleetChain combines blockchain technology with cryptographic game theory to crea
   ```
 
 **Responsibilities**:
-1. Player registration with commitment verification
+1. Player registration: verify the setup proof for a commitment (no fleet is ever received)
 2. Mining coordination for shot allocation
 3. Shot firing and transaction creation
-4. Hit report verification with ZK proofs
+4. Shot log, per-defender response ordering, Groth16 verification of hit reports, optional response deadlines
 5. Game state queries and statistics
 6. Blockchain validation
 
 **Key Methods**:
-- `register_player()`: Register with commitment
+- `register_player(id, commitment_hex, setup_proof)`: Register with commitment + ZK proof
+- `pending_shots()`: Shots a player still owes a proof for
 - `mine_for_shots()`: Mine to earn shots
 - `fire_shot()`: Create shot transaction
-- `report_hit()`: Submit hit report with proof
+- `report_hit()`: Verify a proof-carrying answer and advance the defender's commitment
+- `enforce_timeouts()`: Forfeit players past `response_timeout_blocks`
 - `verify_blockchain()`: Validate entire chain
 
 ## Data Flow
@@ -210,13 +192,10 @@ FleetChain combines blockchain technology with cryptographic game theory to crea
 ### 1. Player Registration Flow
 
 ```
-Player → Generate Ships → Create Commitment → Register
-                              ↓
-                    commitment = SHA256(positions || salt)
-                              ↓
-                    Store: commitment (public)
-                           salt (private)
-                           positions (private)
+Player → Choose fleet (local) → C0 = Poseidon(salt, fleet) → Prove "C0 hides a legal fleet"
+                                        ↓
+                    Send to coordinator: C0 + proof  (public)
+                    Keep locally:        fleet + salt (private, never sent)
 ```
 
 ### 2. Mining Flow
@@ -253,18 +232,20 @@ Player → Fire Shot → Create Transaction → Add to Pool
 ### 4. Verification Flow
 
 ```
-Shot Lands → Target Player → Check Hit/Miss → Generate Proof
-                                  ↓
-                            if HIT:
-                              prove_hit(position)
-                            else:
-                              prove_miss(position)
-                                  ↓
-                            Submit HitReport
-                                  ↓
-                            Verify Proof
-                                  ↓
-                            Update Game State
+Shot appended to public shot log
+        ↓
+Every living player except the shooter, in shot order:
+        ↓
+Defender (locally): hit? alive? new state, fresh salt → C_new
+        ↓
+Prove: "state opening C_old gives these bits and C_new"   (Groth16)
+        ↓
+Submit HitReport {is_hit, is_alive, new_commitment, proof}
+        ↓
+Coordinator verifies with public inputs it builds itself
+  (C_old from its records, x/y from its shot log)
+        ↓
+Accept: state := C_new, ledger gains (shot, player, hit, alive)
 ```
 
 ## Security Model
@@ -304,59 +285,30 @@ Shot Lands → Target Player → Check Hit/Miss → Generate Proof
 - In-memory blockchain (no persistence)
 - No network layer (local only)
 
-**Future Improvements**:
-- Parallel mining with thread pools
-- Persistent storage (database)
-- P2P networking for multiplayer
-- Sharding for large player counts
-
 ## Cryptographic Details
 
 ### Commitment Scheme
 
-**Construction**:
 ```
-commitment = SHA256(sort(positions) || salt)
+C = Poseidon(salt, x_1, y_1, alive_1, ..., x_M, y_M, alive_M)
 ```
 
-**Properties**:
-- **Binding**: Cannot change positions after commitment
-- **Hiding**: Positions not revealed by commitment
-- **Deterministic**: Same input always produces same commitment
+- **Binding**: collision resistance of Poseidon; the fleet cannot change after registration
+- **Hiding**: a 255-bit random salt, refreshed on every state transition
+- The commitment is never opened: all checks happen inside zero-knowledge proofs
 
-**Security**:
-- Collision resistance: SHA-256 (2^128 security)
-- Preimage resistance: Cannot reverse commitment
-- Salt prevents rainbow tables
+### Zero-Knowledge Proofs
 
-### Zero-Knowledge Proofs (Simplified)
+Groth16 over BLS12-381 via `bellman`. Two circuits:
 
-**Current Implementation**:
-- Commitment-based proofs (not full ZK-SNARKs)
-- Reveals position on hit, hides on miss
-- Sufficient for prototype demonstration
+- `SetupCircuit` (4,253 constraints): public `[commitment, board_size]`; the fleet is derived
+  from per-ship origin/direction and range-checked against the board.
+- `ShotCircuit` (7,852 constraints): public `[old_commitment, new_commitment, x, y, hit, alive]`;
+  proves the hit/alive bits and that the new commitment is the old state with the hit cells killed.
 
-**Full ZK-SNARK Implementation** (Future):
-- Use bellman + bls12_381 libraries
-- Prove "position ∈ ship_positions" without revealing positions
-- Prove "position ∉ ship_positions" without revealing positions
-- No information leakage
-
-**Circuit Design** (Future):
-```
-Public Inputs:
-  - board_commitment
-  - shot_position
-  - is_hit (boolean)
-
-Private Inputs:
-  - all_ship_positions
-  - salt
-
-Constraints:
-  1. commitment == SHA256(positions || salt)
-  2. is_hit == (shot_position ∈ positions)
-```
+Full details, including the table of attacks and what is leaked, are in
+[ZK_PROTOCOL.md](ZK_PROTOCOL.md). **Caveats**: the shipped Groth16 setup is single-party
+(development only) and the Poseidon constants are self-generated and unaudited.
 
 ## Game Theory
 
@@ -407,8 +359,9 @@ In a multi-player game:
 ## Future Enhancements
 
 ### Short-Term
-1. Full ZK-SNARK implementation
-2. Persistent blockchain storage
+1. Replicate registrations, the shot log and responses across nodes (or put them on-chain)
+2. Multi-party trusted-setup ceremony (or a transparent proof system), standard Poseidon constants, authentication
+3. Persistent blockchain storage
 3. Web-based UI
 4. Replay functionality
 
@@ -423,7 +376,3 @@ In a multi-player game:
 2. NFT integration for ships
 3. Decentralized autonomous organization (DAO) governance
 4. Mobile app
-
-## Conclusion
-
-FleetChain demonstrates how blockchain and cryptography can create trustless, verifiable games. The architecture balances simplicity (for educational purposes) with sophistication (demonstrating real cryptographic techniques). While the current implementation is a prototype, it provides a solid foundation for a production-grade decentralized game.

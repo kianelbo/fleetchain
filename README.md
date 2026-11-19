@@ -1,11 +1,7 @@
 # FleetChain: Blockchain Battleship
 
-A decentralized Battleship game implementation using blockchain technology and cryptographic proofs in Rust.
-
-## Overview
-
-FleetChain is a prototype blockchain-based Battleship game where:
-- Players place their fleets on a **shared grid** where multiple ships can occupy the same cells
+FleetChain is a prototype decentralized blockchain-based Battleship game where:
+- Players place their fleets on a **shared grid** (multiple ships can occupy the same cells)
 - Ship placements are **hidden** using cryptographic commitments
 - Players must **mine** to earn shots
 - Shots are recorded as **blockchain transactions**
@@ -13,25 +9,24 @@ FleetChain is a prototype blockchain-based Battleship game where:
 
 ## Key Features
 
-### 🎯 Shared Grid System
+### Shared Grid System
 Unlike traditional Battleship, all players place ships on the same shared grid. Multiple ships from different players can occupy the same cell, creating interesting strategic dynamics.
 
-### 🔐 Cryptographic Commitments
+### Cryptographic Commitments
 When registering, players:
-1. Place their ships on the grid
-2. Generate a cryptographic commitment: `commitment = SHA256(ship_positions || salt)`
-3. Submit the commitment hash (without revealing the salt)
-4. The salt is kept secret for later verification
+1. Place their ships (kept on their own machine)
+2. Compute a Poseidon commitment to the fleet and a random salt
+3. Submit **only the commitment plus a zero-knowledge proof** that it hides a legal fleet inside the board
 
-This prevents cheating while keeping ship positions hidden.
+The coordinator and all other players never see ship positions or the salt. See [docs/ZK_PROTOCOL.md](docs/ZK_PROTOCOL.md).
 
-### ⛏️ Mining for Shots
+### Mining for Shots
 Players must mine blocks to earn shots:
 - Mining involves solving a proof-of-work puzzle
 - Successfully mining a block rewards the player with shot(s)
 - This creates a fair resource distribution mechanism
 
-### 📜 Blockchain Transactions
+### Blockchain Transactions
 Every shot fired is recorded as a blockchain transaction containing:
 - Player ID
 - Target coordinates (x, y)
@@ -40,24 +35,11 @@ Every shot fired is recorded as a blockchain transaction containing:
 
 The blockchain provides an immutable, tamper-proof record of all game actions.
 
-### 🔍 Zero-Knowledge Proofs
-After each shot, targeted players must report hits/misses with ZK proofs:
-- **Hit proof**: Reveals the specific hit position with a commitment
-- **Miss proof**: Proves no ship exists at that position without revealing ship locations
-- Prevents false reporting while maintaining privacy
-
-## Architecture
-
-```
-src/
-├── blockchain.rs    # Blockchain implementation (Block, Transaction, Chain)
-├── game.rs          # Game logic (Grid, Ship, Player, HitReport)
-├── crypto.rs        # Cryptographic functions (commitments, ZK proofs)
-├── coordinator.rs   # Game coordinator (orchestrates blockchain + game state)
-├── network.rs       # Network node and peer management
-├── api.rs           # HTTP API endpoints for node communication
-└── main.rs          # Network node application
-```
+### Zero-Knowledge Proofs
+Because nobody knows who occupies a cell, every living player (except the shooter) answers every shot with a Groth16 proof:
+- The proof shows that the announced **hit/miss** and **alive/sunk** bits are consistent with the player's committed fleet
+- It also commits to the updated fleet (hit cells die), so damage persists and old answers cannot be replayed
+- Nothing else is revealed: not the cell contents beyond the one bit, not ship shapes, not remaining HP
 
 ## Core Components
 
@@ -69,13 +51,17 @@ src/
 ### Game Module
 - **Grid**: Shared grid where ships are placed
 - **Ship**: Ship with positions and hit tracking
-- **Player**: Player state including ships and commitments (shot availability is enforced on-chain)
-- **HitReport**: Report with ZK proof for verification
+- **Player**: Client-side view of a fleet (legacy helper; the coordinator no longer stores fleets)
+- **ShotRecord / HitReport**: Public shot log entry, and a defender's proof-carrying answer to it
 
 ### Crypto Module
-- **Commitment Scheme**: SHA256-based commitments for ship positions
-- **ZK Proofs**: Simplified zero-knowledge proofs for hit/miss verification
-- **Salt Generation**: Secure random salt generation
+- Legacy SHA-256 commitment helpers (no longer used by the game protocol)
+
+### ZK Module
+- **Poseidon**: hash over the BLS12-381 scalar field, native + in-circuit
+- **Circuits**: `SetupCircuit` (legal fleet) and `ShotCircuit` (hit/miss + state update), Groth16
+- **FleetSecret**: player-side secrets; builds registration and shot proofs
+- **Verifier / ZkSystem**: key handling and proof verification
 
 ### Coordinator Module
 - **GameCoordinator**: Orchestrates the entire game
@@ -131,165 +117,4 @@ Options:
 
 ### HTTP API Endpoints
 
-Once a node is running, you can interact with it via HTTP:
-
-#### Blockchain Endpoints
-- `GET /api/blockchain` - Get the entire blockchain
-- `POST /api/block` - Receive a new block from peer
-- `POST /api/transaction` - Receive a new transaction from peer
-
-#### Game Endpoints
-- `POST /api/register` - Register a new player
-  ```json
-  {
-    "player_id": "player1",
-    "ships": [...],
-    "board_commitment": "abc123...",
-    "salt": "xyz789..."
-  }
-  ```
-- `POST /api/fire` - Fire a shot
-  ```json
-  {
-    "player_id": "player1",
-    "target_x": 5,
-    "target_y": 5
-  }
-  ```
-- `POST /api/mine` - Mine for shots
-  ```json
-  {
-    "player_id": "player1"
-  }
-  ```
- - `POST /api/shots` - Get current unspent shots (UTXO-based) for a player
-   ```json
-   {
-     "player_id": "player1"
-   }
-   ```
-
-#### Network Endpoints
-- `GET /api/peers` - Get all connected peers
-- `POST /api/peers` - Add a new peer
-  ```json
-  {
-    "address": "localhost",
-    "port": 8081
-  }
-  ```
-- `POST /api/sync` - Synchronize blockchain with all peers
-
-#### Info Endpoints
-- `GET /api/info` - Get node information
-- `GET /api/stats` - Get game statistics
-
-### Example: Playing via API
-
-```bash
-# Register a player on node 1
-curl -X POST http://localhost:8080/api/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "player_id": "alice",
-    "ships": [
-      {
-        "id": "carrier",
-        "positions": [[0,0],[0,1],[0,2],[0,3],[0,4]],
-        "hits": [false,false,false,false,false]
-      }
-    ],
-    "board_commitment": "...",
-    "salt": "..."
-  }'
-
-# Mine for shots
-curl -X POST http://localhost:8080/api/mine \
-  -H "Content-Type: application/json" \
-  -d '{"player_id": "alice"}'
-
-# Fire a shot (automatically broadcasts to peers)
-curl -X POST http://localhost:8080/api/fire \
-  -H "Content-Type: application/json" \
-  -d '{"player_id": "alice", "target_x": 5, "target_y": 5}'
-
-# Check node info
-curl http://localhost:8080/api/info
-
-# Get blockchain
-curl http://localhost:8080/api/blockchain
-```
-
-## Game Flow
-
-1. **Registration Phase**
-   ```rust
-   // Player creates ships
-   let ships = vec![Ship::new("carrier", positions)];
-   
-   // Generate commitment
-   let salt = generate_salt();
-   let commitment = create_commitment(&positions, &salt);
-   
-   // Register with game
-   game.register_player(player_id, ships, commitment, salt);
-   ```
-
-2. **Mining Phase**
-   ```rust
-   // Mine to earn shots
-   let shots_earned = game.mine_for_shots(player_id)?;
-   ```
-
-3. **Combat Phase**
-   ```rust
-   // Fire a shot (creates transaction)
-   game.fire_shot(player_id, target_x, target_y)?;
-   
-   // Mine transactions into blockchain
-   game.mine_for_shots(miner_id)?;
-   ```
-
-4. **Verification Phase**
-   ```rust
-   // Generate proof for hit/miss
-   let proof = if is_hit {
-       HitProof::prove_hit(position, all_positions, salt)
-   } else {
-       HitProof::prove_miss(position, all_positions, salt)
-   };
-   
-   // Submit report with proof
-   let report = HitReport::new(player_id, x, y, is_hit, proof.serialize());
-   game.report_hit(report)?;
-   ```
-
-## Security Features
-
-- **Tamper-Proof**: Blockchain ensures game history cannot be altered
-- **Commitment Scheme**: Ship positions hidden until verification needed
-- **ZK Proofs**: Hit/miss reports verified without revealing ship locations
-- **Mining**: Fair shot distribution through proof-of-work
-- **Validation**: Full blockchain validation ensures integrity
-
-## Network Features
-
-### 🌐 Distributed Blockchain
-- Each node maintains its own copy of the blockchain
-- Nodes automatically synchronize when connecting to peers
-- Longest valid chain wins (consensus mechanism)
-
-### 📡 Gossip Protocol
-- New transactions are broadcast to all connected peers
-- Newly mined blocks are propagated across the network
-- Automatic peer discovery and announcement
-
-### 🔄 Peer-to-Peer Communication
-- HTTP-based communication between nodes
-- RESTful API for all game actions
-- Automatic blockchain synchronization on startup
-
-### 🎮 Multiplayer Support
-- Players can join from any node in the network
-- Actions on one node are visible to all peers
-- Shared game state across the network
+Once a node is running, you can interact with it via HTTP. See the endpoints [here](docs/NETWORK_GUIDE.md#api-endpoints).

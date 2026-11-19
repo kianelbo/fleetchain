@@ -181,9 +181,11 @@ impl NetworkNode {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterPlayerRequest {
     pub player_id: String,
-    pub ships: Vec<crate::game::Ship>,
+    /// Hex-encoded Poseidon commitment to the secret fleet.
     pub board_commitment: String,
-    pub salt: String,
+    /// Hex-encoded Groth16 proof that the commitment opens to a legal fleet.
+    #[serde(with = "crate::zk::hex_bytes")]
+    pub setup_proof: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -195,6 +197,11 @@ pub struct FireShotRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MineRequest {
+    pub player_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PendingShotsRequest {
     pub player_id: String,
 }
 

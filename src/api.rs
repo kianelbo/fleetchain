@@ -8,12 +8,15 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 use crate::blockchain::{Block, Transaction};
+use crate::coordinator::{ShotOutcome, ShotResponse};
+use crate::game::{HitReport, ShotRecord};
 use crate::network::{
     NetworkNode,
     RegisterPlayerRequest,
     FireShotRequest,
     MineRequest,
     ShotBalanceRequest,
+    PendingShotsRequest,
     ApiResponse,
     Peer,
     BlockchainInfo,
@@ -34,6 +37,10 @@ pub fn create_router(state: AppState) -> Router {
         // Game endpoints
         .route("/api/register", post(register_player))
         .route("/api/fire", post(fire_shot))
+        .route("/api/respond", post(respond_to_shot))
+        .route("/api/pending", post(get_pending_shots))
+        .route("/api/results", get(get_results))
+        .route("/api/zk", get(get_zk_info))
         .route("/api/mine", post(mine_for_shots))
         .route("/api/shots", post(get_shot_balance))
 
@@ -130,9 +137,8 @@ async fn register_player(
 
     match coordinator.register_player(
         req.player_id.clone(),
-        req.ships,
         req.board_commitment,
-        req.salt,
+        &req.setup_proof,
     ) {
         Ok(_) => (
             StatusCode::OK,
@@ -143,6 +149,47 @@ async fn register_player(
             Json(ApiResponse::error(e)),
         ),
     }
+}
+
+/// Submit a zero-knowledge response (hit/miss + proof) to a shot
+async fn respond_to_shot(
+    State(node): State<AppState>,
+    Json(report): Json<HitReport>,
+) -> (StatusCode, Json<ApiResponse<ShotOutcome>>) {
+    let mut coordinator = node.coordinator.write().await;
+    match coordinator.report_hit(report) {
+        Ok(outcome) => (StatusCode::OK, Json(ApiResponse::success(outcome))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(ApiResponse::error(e))),
+    }
+}
+
+/// Shots a player still owes a proof for (oldest first)
+async fn get_pending_shots(
+    State(node): State<AppState>,
+    Json(req): Json<PendingShotsRequest>,
+) -> (StatusCode, Json<ApiResponse<Vec<ShotRecord>>>) {
+    let coordinator = node.coordinator.read().await;
+    if !coordinator.players.contains_key(&req.player_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("Player not found".to_string())),
+        );
+    }
+    (StatusCode::OK, Json(ApiResponse::success(coordinator.pending_shots(&req.player_id))))
+}
+
+/// The public shot log and every verified response
+async fn get_results(
+    State(node): State<AppState>,
+) -> Json<ApiResponse<(Vec<ShotRecord>, Vec<ShotResponse>)>> {
+    let coordinator = node.coordinator.read().await;
+    Json(ApiResponse::success((coordinator.shot_log.clone(), coordinator.responses.clone())))
+}
+
+/// Fingerprint of the verifying keys this node checks proofs against
+async fn get_zk_info(State(node): State<AppState>) -> Json<ApiResponse<String>> {
+    let coordinator = node.coordinator.read().await;
+    Json(ApiResponse::success(coordinator.zk_fingerprint()))
 }
 
 /// Get current unspent shots (UTXO-based) for a player

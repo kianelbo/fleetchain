@@ -1,14 +1,17 @@
+#![allow(dead_code)] // the binary re-declares the library modules wholesale
 mod blockchain;
 mod game;
 mod crypto;
 mod coordinator;
 mod network;
 mod api;
+mod zk;
 
 use clap::Parser;
 use network::{NetworkNode, Peer};
 use std::sync::Arc;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use zk::{Verifier, ZkSystem};
 
 /// FleetChain: Distributed Blockchain Battleship
 #[derive(Parser, Debug)]
@@ -41,6 +44,58 @@ struct Args {
     /// Path to blockchain data file (default: ./data/{node_id}_blockchain.json)
     #[arg(long)]
     blockchain_path: Option<String>,
+
+    /// Groth16 proving-key file; the verifying keys live next to it with a
+    /// `.vk` suffix. Created (INSECURE single-party setup) if missing. All
+    /// nodes and players of a game must use the same keys.
+    #[arg(long, default_value = "./data/zk_params.bin")]
+    zk_params: String,
+
+    /// Eliminate players who leave a shot unanswered for more than this many
+    /// blocks (disabled if omitted)
+    #[arg(long)]
+    response_timeout_blocks: Option<u64>,
+}
+
+fn vk_path(params: &Path) -> PathBuf {
+    let mut s = params.as_os_str().to_owned();
+    s.push(".vk");
+    PathBuf::from(s)
+}
+
+/// Make sure key files exist (running a dev setup if not) and return the verifier.
+fn ensure_zk_keys(params: &Path) -> Arc<Verifier> {
+    let vk = vk_path(params);
+    if let Ok(f) = std::fs::File::open(&vk) {
+        match Verifier::read(std::io::BufReader::new(f)) {
+            Ok(v) => return Arc::new(v),
+            Err(e) => panic!("Cannot read verifying keys {:?}: {}", vk, e),
+        }
+    }
+    if let Some(dir) = params.parent() {
+        std::fs::create_dir_all(dir).expect("Failed to create zk params directory");
+    }
+    let sys = if params.exists() {
+        println!("Deriving verifying keys from {:?} ...", params);
+        load_proving_system(params)
+    } else {
+        eprintln!("WARNING: generating ZK parameters with a single-party setup.");
+        eprintln!("         Whoever runs this can forge proofs. Development use only.");
+        let sys = ZkSystem::generate(&mut rand::rngs::OsRng).expect("ZK setup failed");
+        let f = std::fs::File::create(params).expect("cannot write proving keys");
+        sys.write(std::io::BufWriter::new(f)).expect("cannot write proving keys");
+        println!("✓ Wrote proving keys to {:?}", params);
+        sys
+    };
+    let f = std::fs::File::create(&vk).expect("cannot write verifying keys");
+    sys.verifier.write(std::io::BufWriter::new(f)).expect("cannot write verifying keys");
+    println!("✓ Wrote verifying keys to {:?}", vk);
+    sys.verifier.clone()
+}
+
+fn load_proving_system(params: &Path) -> ZkSystem {
+    let f = std::fs::File::open(params).unwrap_or_else(|e| panic!("Cannot open {:?}: {}", params, e));
+    ZkSystem::read(std::io::BufReader::new(f)).unwrap_or_else(|e| panic!("Cannot read {:?}: {}", params, e))
 }
 
 #[tokio::main]
@@ -77,6 +132,16 @@ async fn main() {
         blockchain_path,
     ));
 
+    // Load (or create) the ZK verifying keys and hand them to the coordinator
+    let zk_params = PathBuf::from(&args.zk_params);
+    let verifier = ensure_zk_keys(&zk_params);
+    println!("ZK verifying-key fingerprint: {}\n", verifier.fingerprint());
+    {
+        let mut coordinator = node.coordinator.write().await;
+        coordinator.set_verifier(verifier);
+        coordinator.response_timeout_blocks = args.response_timeout_blocks;
+    }
+
     // Connect to peers
     if !args.peers.is_empty() {
         println!("Connecting to peers...");
@@ -107,7 +172,8 @@ async fn main() {
     if args.demo {
         // Run demo mode
         println!("\n=== Running Demo Mode ===\n");
-        run_demo(node.clone()).await;
+        let sys = load_proving_system(&zk_params);
+        run_demo(node.clone(), &sys).await;
     }
 
     // Start HTTP server
@@ -120,6 +186,10 @@ async fn main() {
     println!("  GET  /api/peers          - Connected peers");
     println!("  POST /api/register       - Register player");
     println!("  POST /api/fire           - Fire shot");
+    println!("  POST /api/respond        - Answer a shot with a ZK proof");
+    println!("  POST /api/pending        - Shots a player still owes a proof for");
+    println!("  GET  /api/results        - Public shot log and verified responses");
+    println!("  GET  /api/zk             - Verifying-key fingerprint");
     println!("  POST /api/mine           - Mine for shots");
     println!("  POST /api/shots          - Get shot balance");
     println!("  POST /api/peers          - Add peer");
@@ -133,93 +203,116 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn run_demo(node: Arc<NetworkNode>) {
+async fn run_demo(node: Arc<NetworkNode>, sys: &ZkSystem) {
     let mut coordinator = node.coordinator.write().await;
-    demo_game(&mut coordinator);
+    demo_game(&mut coordinator, sys);
 }
 
-fn demo_game(game: &mut coordinator::GameCoordinator) {
+/// Register a player from a secret fleet: the coordinator only ever sees the
+/// commitment and the proof.
+fn demo_register(
+    game: &mut coordinator::GameCoordinator,
+    sys: &ZkSystem,
+    id: &str,
+    ships: Vec<game::Ship>,
+) -> Option<zk::FleetSecret> {
+    let secret = match zk::FleetSecret::from_ships(&ships, game.grid.size) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("✗ Invalid fleet for {}: {}", id, e);
+            return None;
+        }
+    };
+    let proof = secret.prove_setup(sys).expect("setup proving");
+    match game.register_player(id.to_string(), secret.commitment_hex(), &proof) {
+        Ok(_) => {
+            println!("✓ {} registered. Public commitment: {}...", id, &secret.commitment_hex()[..16]);
+            Some(secret)
+        }
+        Err(e) => {
+            println!("✗ Failed to register {}: {}", id, e);
+            None
+        }
+    }
+}
+
+/// Answer every shot `id` still owes, printing what becomes public.
+fn demo_respond(game: &mut coordinator::GameCoordinator, sys: &ZkSystem, id: &str, secret: &mut zk::FleetSecret) {
+    for shot in game.pending_shots(id) {
+        let pending = match secret.respond(sys, id, &shot) {
+            Ok(p) => p,
+            Err(e) => {
+                println!("✗ {} could not prove: {}", id, e);
+                return;
+            }
+        };
+        match game.report_hit(pending.report.clone()) {
+            Ok(out) => {
+                println!(
+                    "  {} answers shot #{} ({}, {}) from {}: {}{}",
+                    id,
+                    out.shot_index,
+                    shot.x,
+                    shot.y,
+                    shot.shooter,
+                    if out.is_hit { "HIT" } else { "miss" },
+                    if out.defeated { "  -- fleet destroyed!" } else { "" }
+                );
+                secret.apply(pending);
+            }
+            Err(e) => println!("✗ {} response rejected: {}", id, e),
+        }
+    }
+}
+
+fn demo_game(game: &mut coordinator::GameCoordinator, sys: &ZkSystem) {
     use game::Ship;
-    use crypto::{generate_salt, create_commitment};
-    // Player 1 setup
-    println!("Registering Player 1...");
-    let player1_ships = vec![
-        Ship::new("carrier".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)]),
-        Ship::new("battleship".to_string(), vec![(2, 0), (2, 1), (2, 2), (2, 3)]),
-        Ship::new("destroyer".to_string(), vec![(4, 0), (4, 1), (4, 2)]),
-    ];
 
-    let player1_positions: Vec<(u8, u8)> = player1_ships.iter()
-        .flat_map(|ship| ship.positions.clone())
-        .collect();
+    println!("--- Registration (commitment + zero-knowledge fleet proof) ---");
+    let mut p1 = demo_register(game, sys, "player1", vec![
+        Ship::new("carrier".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
+        Ship::new("cruiser".to_string(), vec![(2, 0), (2, 1), (2, 2)]),
+        Ship::new("submarine".to_string(), vec![(4, 0), (4, 1)]),
+        Ship::new("destroyer".to_string(), vec![(6, 0)]),
+    ]);
+    let mut p2 = demo_register(game, sys, "player2", vec![
+        Ship::new("carrier".to_string(), vec![(5, 5), (5, 6), (5, 7), (5, 8)]),
+        Ship::new("cruiser".to_string(), vec![(7, 5), (7, 6), (7, 7)]),
+        Ship::new("submarine".to_string(), vec![(9, 5), (9, 6)]),
+        Ship::new("destroyer".to_string(), vec![(0, 9)]),
+    ]);
+    let (Some(p1), Some(p2)) = (p1.as_mut(), p2.as_mut()) else { return };
 
-    let player1_salt = generate_salt();
-    let player1_commitment = create_commitment(&player1_positions, &player1_salt);
-
-    match game.register_player(
-        "player1".to_string(),
-        player1_ships,
-        player1_commitment.clone(),
-        player1_salt.clone(),
-    ) {
-        Ok(_) => println!("✓ Player 1 registered with commitment: {}...", &player1_commitment[..16]),
-        Err(e) => println!("✗ Failed to register Player 1: {}", e),
-    }
-
-    // Player 2 setup
-    println!("\nRegistering Player 2...");
-    let player2_ships = vec![
-        Ship::new("carrier".to_string(), vec![(5, 5), (5, 6), (5, 7), (5, 8), (5, 9)]),
-        Ship::new("battleship".to_string(), vec![(7, 5), (7, 6), (7, 7), (7, 8)]),
-        Ship::new("destroyer".to_string(), vec![(9, 5), (9, 6), (9, 7)]),
-    ];
-
-    let player2_positions: Vec<(u8, u8)> = player2_ships.iter()
-        .flat_map(|ship| ship.positions.clone())
-        .collect();
-
-    let player2_salt = generate_salt();
-    let player2_commitment = create_commitment(&player2_positions, &player2_salt);
-
-    match game.register_player(
-        "player2".to_string(),
-        player2_ships,
-        player2_commitment.clone(),
-        player2_salt.clone(),
-    ) {
-        Ok(_) => println!("✓ Player 2 registered with commitment: {}...", &player2_commitment[..16]),
-        Err(e) => println!("✗ Failed to register Player 2: {}", e),
-    }
-
-    // Display initial stats
     println!("\n{}", game.get_stats());
 
     println!("\n--- Mining Phase ---");
-    println!("Player 1 mining for shots...");
-    match game.mine_for_shots("player1") {
-        Ok(shots) => println!("✓ Player 1 earned {} shot(s)", shots),
-        Err(e) => println!("✗ Mining failed: {}", e),
+    for id in ["player1", "player2"] {
+        match game.mine_for_shots(id) {
+            Ok(shots) => println!("✓ {} earned {} shot(s)", id, shots),
+            Err(e) => println!("✗ Mining failed: {}", e),
+        }
     }
 
-    println!("Player 2 mining for shots...");
-    match game.mine_for_shots("player2") {
-        Ok(shots) => println!("✓ Player 2 earned {} shot(s)", shots),
-        Err(e) => println!("✗ Mining failed: {}", e),
-    }
-
-    // Shooting demonstration
     println!("\n--- Combat Phase ---");
-    println!("Player 1 fires at (5, 5)...");
+    println!("player1 fires at (5, 5), a cell where player2 hides a ship...");
     match game.fire_shot("player1".to_string(), 5, 5) {
-        Ok(_) => println!("✓ Shot fired! Transaction added to blockchain"),
+        Ok(_) => println!("✓ Shot recorded; player2 now owes a proof"),
+        Err(e) => println!("✗ Shot failed: {}", e),
+    }
+    println!("player2 fires at (3, 3), an empty cell...");
+    match game.fire_shot("player2".to_string(), 3, 3) {
+        Ok(_) => println!("✓ Shot recorded; player1 now owes a proof"),
         Err(e) => println!("✗ Shot failed: {}", e),
     }
 
-    println!("Player 2 fires at (0, 0)...");
-    match game.fire_shot("player2".to_string(), 0, 0) {
-        Ok(_) => println!("✓ Shot fired! Transaction added to blockchain"),
-        Err(e) => println!("✗ Shot failed: {}", e),
-    }
+    println!("\n--- Zero-knowledge responses ---");
+    demo_respond(game, sys, "player2", p2);
+    demo_respond(game, sys, "player1", p1);
+    println!(
+        "(Secretly: player1 has {} live cells, player2 has {}. The coordinator only knows the bits above.)",
+        p1.remaining_cells(),
+        p2.remaining_cells()
+    );
 
     // Mine the transactions
     println!("\nMining combat transactions...");
@@ -229,11 +322,11 @@ fn demo_game(game: &mut coordinator::GameCoordinator) {
     println!("\n--- Final Stats ---");
     println!("{}", game.get_stats());
     println!("Blockchain valid: {}", game.verify_blockchain());
-    
+
     // Display blockchain
     println!("\n--- Blockchain ---");
     for (i, block) in game.blockchain.chain.iter().enumerate() {
-        println!("Block #{}: {} transactions, hash: {}...", 
+        println!("Block #{}: {} transactions, hash: {}...",
             i, block.transactions.len(), &block.hash[..16]);
     }
 }

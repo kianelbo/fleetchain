@@ -5,9 +5,11 @@ use axum::{
 use tower::util::ServiceExt;
 use std::sync::Arc;
 use fleetchain::api::create_router;
-use fleetchain::network::{NetworkNode, RegisterPlayerRequest, FireShotRequest, MineRequest, Peer};
+use fleetchain::network::{NetworkNode, RegisterPlayerRequest, FireShotRequest, MineRequest, PendingShotsRequest, Peer};
+use fleetchain::game::ShotRecord;
+use fleetchain::zk::FleetSecret;
 use fleetchain::game::Ship;
-use fleetchain::crypto::{generate_salt, create_commitment};
+mod common;
 use fleetchain::blockchain::{Block, Transaction};
 
 // Helper function to create a valid 4-ship fleet
@@ -38,40 +40,38 @@ async fn test_get_blockchain() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+async fn post_json(app: axum::Router, uri: &str, body: String) -> (StatusCode, serde_json::Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
 #[tokio::test]
 async fn test_register_player() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
     let app = create_router(node.clone());
 
-    let ships = create_valid_fleet();
-
-    let all_positions: Vec<(u8, u8)> = ships.iter()
-        .flat_map(|ship| ship.positions.clone())
-        .collect();
-
-    let salt = generate_salt();
-    let commitment = create_commitment(&all_positions, &salt);
-
+    let secret = FleetSecret::from_ships(&create_valid_fleet(), 10).unwrap();
     let register_req = RegisterPlayerRequest {
         player_id: "player1".to_string(),
-        ships,
-        board_commitment: commitment,
-        salt,
+        board_commitment: secret.commitment_hex(),
+        setup_proof: secret.prove_setup(common::sys()).unwrap(),
     };
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/register")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&register_req).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
+    let (status, _) = post_json(app, "/api/register", serde_json::to_string(&register_req).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(node.coordinator.read().await.players.len(), 1);
 }
 
 #[tokio::test]
@@ -79,33 +79,111 @@ async fn test_register_player_invalid_commitment() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
     let app = create_router(node.clone());
 
-    let ships = create_valid_fleet();
-
-    let salt = generate_salt();
-    // Create commitment with different positions than the ships
-    let wrong_positions = vec![(5, 5), (6, 6)];
-    let commitment = create_commitment(&wrong_positions, &salt);
-
+    // A valid proof for one fleet, submitted with the commitment of another.
+    let secret = FleetSecret::from_ships(&create_valid_fleet(), 10).unwrap();
+    let other = FleetSecret::from_ships(&create_valid_fleet(), 10).unwrap();
     let register_req = RegisterPlayerRequest {
         player_id: "player1".to_string(),
-        ships,
-        board_commitment: commitment,
-        salt,
+        board_commitment: other.commitment_hex(),
+        setup_proof: secret.prove_setup(common::sys()).unwrap(),
     };
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/register")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&register_req).unwrap()))
-                .unwrap(),
-        )
+    let (status, _) = post_json(app, "/api/register", serde_json::to_string(&register_req).unwrap()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(node.coordinator.read().await.players.len(), 0);
+}
+
+#[tokio::test]
+async fn test_register_request_never_contains_ship_positions() {
+    // The wire format has no field that could carry a fleet or a salt.
+    let secret = FleetSecret::from_ships(&create_valid_fleet(), 10).unwrap();
+    let req = RegisterPlayerRequest {
+        player_id: "player1".to_string(),
+        board_commitment: secret.commitment_hex(),
+        setup_proof: secret.prove_setup(common::sys()).unwrap(),
+    };
+    let json: serde_json::Value = serde_json::to_value(&req).unwrap();
+    let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, ["board_commitment", "player_id", "setup_proof"]);
+}
+
+#[tokio::test]
+async fn test_zero_knowledge_round_trip_over_http() {
+    let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
+    let sys = common::sys();
+
+    let mut defender = FleetSecret::from_ships(&create_valid_fleet(), 10).unwrap();
+    let attacker = FleetSecret::from_ships(&common::horizontal_fleet(), 10).unwrap();
+    for (id, s) in [("defender", &defender), ("attacker", &attacker)] {
+        let req = RegisterPlayerRequest {
+            player_id: id.to_string(),
+            board_commitment: s.commitment_hex(),
+            setup_proof: s.prove_setup(sys).unwrap(),
+        };
+        let (status, _) = post_json(create_router(node.clone()), "/api/register", serde_json::to_string(&req).unwrap()).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // attacker fires at the defender's carrier (0, 1) -- a hit
+    let (status, _) = post_json(
+        create_router(node.clone()),
+        "/api/fire",
+        serde_json::to_string(&FireShotRequest { player_id: "attacker".into(), target_x: 0, target_y: 1 }).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // the defender asks what it owes ...
+    let (status, body) = post_json(
+        create_router(node.clone()),
+        "/api/pending",
+        serde_json::to_string(&PendingShotsRequest { player_id: "defender".into() }).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pending: Vec<ShotRecord> = serde_json::from_value(body["data"].clone()).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!((pending[0].x, pending[0].y), (0, 1));
+
+    // ... the shooter owes nothing for its own shot
+    let (_, body) = post_json(
+        create_router(node.clone()),
+        "/api/pending",
+        serde_json::to_string(&PendingShotsRequest { player_id: "attacker".into() }).unwrap(),
+    )
+    .await;
+    assert_eq!(body["data"].as_array().unwrap().len(), 0);
+
+    // ... and answers with a proof
+    let pr = defender.respond(sys, "defender", &pending[0]).unwrap();
+    let (status, body) = post_json(create_router(node.clone()), "/api/respond", serde_json::to_string(&pr.report).unwrap()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["is_hit"], true);
+    defender.apply(pr);
+
+    // The same answer cannot be submitted twice.
+    let mut replay = defender.respond(sys, "defender", &pending[0]).unwrap().report;
+    replay.shot_index = 0;
+    let (status, _) = post_json(create_router(node.clone()), "/api/respond", serde_json::to_string(&replay).unwrap()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Public ledger shows only the result bits.
+    let resp = create_router(node.clone())
+        .oneshot(Request::builder().uri("/api/results").body(Body::empty()).unwrap())
         .await
         .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(text.contains("\"is_hit\":true"));
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    // Verifying-key fingerprint is exposed so players can check they agree.
+    let resp = create_router(node.clone())
+        .oneshot(Request::builder().uri("/api/zk").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]
@@ -116,12 +194,7 @@ async fn test_mine_for_shots() {
     {
         let mut coordinator = node.coordinator.write().await;
         let ships = create_valid_fleet();
-        let all_positions: Vec<(u8, u8)> = ships.iter()
-            .flat_map(|ship| ship.positions.clone())
-            .collect();
-        let salt = generate_salt();
-        let commitment = create_commitment(&all_positions, &salt);
-        coordinator.register_player("player1".to_string(), ships, commitment, salt).unwrap();
+        common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
     }
 
     let app = create_router(node.clone());
@@ -153,12 +226,7 @@ async fn test_fire_shot() {
     {
         let mut coordinator = node.coordinator.write().await;
         let ships = create_valid_fleet();
-        let all_positions: Vec<(u8, u8)> = ships.iter()
-            .flat_map(|ship| ship.positions.clone())
-            .collect();
-        let salt = generate_salt();
-        let commitment = create_commitment(&all_positions, &salt);
-        coordinator.register_player("player1".to_string(), ships, commitment, salt).unwrap();
+        common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
         coordinator.mine_for_shots("player1").unwrap();
     }
 
@@ -193,12 +261,7 @@ async fn test_fire_shot_without_shots() {
     {
         let mut coordinator = node.coordinator.write().await;
         let ships = create_valid_fleet();
-        let all_positions: Vec<(u8, u8)> = ships.iter()
-            .flat_map(|ship| ship.positions.clone())
-            .collect();
-        let salt = generate_salt();
-        let commitment = create_commitment(&all_positions, &salt);
-        coordinator.register_player("player1".to_string(), ships, commitment, salt).unwrap();
+        common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
     }
 
     let app = create_router(node.clone());

@@ -124,25 +124,34 @@ impl Player {
     }
 }
 
-/// Hit report with proof
+/// A shot as recorded in the coordinator's public, ordered shot log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShotRecord {
+    /// Position in the global shot log (0, 1, 2, ...).
+    pub index: u64,
+    pub shooter: String,
+    pub x: u8,
+    pub y: u8,
+    /// Chain length when the shot was fired; used for response deadlines.
+    pub fired_at_block: u64,
+}
+
+/// A defender's answer to one shot: the hit/alive bits, the commitment to
+/// their updated (secret) state, and the Groth16 proof tying them together.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HitReport {
     pub player_id: String,
+    /// Which shot in the global log this answers. Must be the defender's
+    /// next unanswered shot.
+    pub shot_index: u64,
     pub shot_x: u8,
     pub shot_y: u8,
     pub is_hit: bool,
-    pub proof: Vec<u8>, // ZK proof data
-}
-
-impl HitReport {
-    #[allow(dead_code)]
-    pub fn new(player_id: String, shot_x: u8, shot_y: u8, is_hit: bool, proof: Vec<u8>) -> Self {
-        Self {
-            player_id,
-            shot_x,
-            shot_y,
-            is_hit,
-            proof,
-        }
-    }
+    /// Whether the defender still has any live ship cell after this shot.
+    pub is_alive: bool,
+    /// Hex-encoded commitment to the defender's state after this shot.
+    pub new_commitment: String,
+    /// Groth16 proof (192 bytes, hex in JSON).
+    #[serde(with = "crate::zk::hex_bytes")]
+    pub proof: Vec<u8>,
 }

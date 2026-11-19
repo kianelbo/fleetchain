@@ -1,9 +1,5 @@
 # FleetChain Network Guide
 
-## Overview
-
-FleetChain has been transformed from a demo application into a fully distributed blockchain network. Nodes can now communicate with each other via HTTP, synchronize their blockchains, and play the game in a peer-to-peer fashion.
-
 ## Architecture
 
 ### Network Components
@@ -27,25 +23,17 @@ FleetChain has been transformed from a demo application into a fully distributed
 
 ## Running Nodes
 
-### Single Node
-
+**First Node:**
 ```bash
 cargo run -- --port 8080 --node-id node1
 ```
 
-### Multi-Node Network
-
-**Terminal 1 - First Node:**
-```bash
-cargo run -- --port 8080 --node-id node1
-```
-
-**Terminal 2 - Second Node (connects to first):**
+**Second Node (connects to first):**
 ```bash
 cargo run -- --port 8081 --node-id node2 --peers localhost:8080
 ```
 
-**Terminal 3 - Third Node (connects to network):**
+**Third Node (connects to network):**
 ```bash
 cargo run -- --port 8082 --node-id node3 --peers localhost:8080,localhost:8081
 ```
@@ -110,21 +98,17 @@ Receive a new transaction from a peer (used internally by gossip protocol).
 ### Game Endpoints
 
 #### POST /api/register
-Register a new player with their fleet.
+Register a player from a **commitment** to a secret fleet plus a zero-knowledge
+proof that it hides a legal fleet on this node's board. Ship positions and the
+salt are never sent. Produce both values with `FleetSecret` (see
+`examples/zk_client.rs`); both are hex strings.
 
 **Request:**
 ```json
 {
   "player_id": "alice",
-  "ships": [
-    {
-      "id": "carrier",
-      "positions": [[0,0],[0,1],[0,2],[0,3],[0,4]],
-      "hits": [false,false,false,false,false]
-    }
-  ],
-  "board_commitment": "abc123...",
-  "salt": "xyz789..."
+  "board_commitment": "<64 hex chars: Poseidon commitment>",
+  "setup_proof": "<384 hex chars: 192-byte Groth16 proof>"
 }
 ```
 
@@ -136,6 +120,28 @@ Register a new player with their fleet.
   "error": null
 }
 ```
+Rejected (400) if the proof is invalid for the commitment and this board size, the
+id is taken, or the commitment was already registered.
+
+#### POST /api/pending
+Shots a player still owes a zero-knowledge answer for (oldest first). Every living
+player except the shooter owes an answer to every shot.
+
+**Request:** `{"player_id": "alice"}`
+
+#### POST /api/respond
+Answer the player's next owed shot with a `HitReport`: `player_id`, `shot_index`,
+`shot_x`, `shot_y`, `is_hit`, `is_alive`, `new_commitment` (hex) and `proof` (hex).
+The node verifies the Groth16 proof against the player's current commitment and
+the shot's coordinates from its own log. Answers must be given in shot order.
+
+#### GET /api/results
+The public shot log and every verified response (`is_hit`, `is_alive`, new commitment).
+
+#### GET /api/zk
+Fingerprint of the verifying keys. **All nodes and players of a game must use the
+same keys**: start every node with the same `--zk-params` file (or copy its `.vk`
+file next to it) and compare fingerprints.
 
 #### POST /api/fire
 Fire a shot at coordinates. Automatically broadcasts to all peers.
@@ -297,10 +303,9 @@ cargo run -- --port 8080 --node-id node1
 cargo run -- --port 8081 --node-id node2 --peers localhost:8080
 
 # Terminal 3: Interact with the network
-# Register player on node 1
-curl -X POST http://localhost:8080/api/register \
-  -H "Content-Type: application/json" \
-  -d '{"player_id": "alice", "ships": [...], "board_commitment": "...", "salt": "..."}'
+# Register player on node 1: the client builds a random secret fleet locally,
+# proves it legal, and sends only the commitment and proof
+cargo run --example zk_client -- register --id alice
 
 # Mine for shots on node 1
 curl -X POST http://localhost:8080/api/mine \
@@ -327,16 +332,21 @@ curl http://localhost:8081/api/blockchain
 
 ### Testing Scripts
 
-Two helper scripts are provided:
+Helper programs:
 
-1. **test_network.sh** - Basic network functionality test
-2. **examples/network_demo.sh** - Complete game flow demonstration
+1. **examples/network_demo.sh** - Complete game flow demonstration (needs `jq`; run it
+   from the repository root against a running node)
+2. **examples/zk_client.rs** - Player client: `register`, `respond`, `status`. Your secret
+   fleet is stored in `./data/<id>.secret.json` in plaintext; keep it private.
+3. **examples/zk_proof_demo.rs** - Self-contained walkthrough of the proof protocol
 
-Run them with:
 ```bash
-./test_network.sh
+cargo run -- --port 8080 --node-id node1      # creates ./data/zk_params.bin(.vk) on first start
 ./examples/network_demo.sh
 ```
+
+Note: players, registrations, the shot log and responses are held by the node that
+received them and are not gossiped to peers (only blocks and transactions are).
 
 ## Network Security
 
@@ -388,34 +398,3 @@ Failed to sync with peer: timeout
 Invalid previous hash
 ```
 **Solution:** This is normal - the node rejects invalid blocks automatically
-
-## Performance Considerations
-
-### Mining Difficulty
-
-Higher difficulty = slower mining = more CPU usage
-- Development: difficulty 2 (fast)
-- Testing: difficulty 3-4 (moderate)
-- Production: difficulty 5+ (secure)
-
-### Network Latency
-
-- Local network: <10ms
-- Internet: 50-200ms
-- Blockchain sync time increases with chain length
-
-### Scalability
-
-Current implementation supports:
-- ~10-20 nodes efficiently
-- Hundreds of transactions per block
-- Thousands of blocks in the chain
-
-For larger networks, consider:
-- WebSocket for real-time updates
-- DHT for peer discovery
-- Sharding for scalability
-
-## Conclusion
-
-FleetChain is now a fully functional distributed blockchain network. Nodes can join, play the game, and maintain consensus through the longest valid chain rule. The HTTP API provides a simple interface for all operations, and the gossip protocol ensures network-wide consistency.
