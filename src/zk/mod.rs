@@ -31,8 +31,8 @@ pub use circuits::{Segment, SetupCircuit, ShipPlacement, ShotCircuit};
 pub use client::{FleetSecret, PendingResponse};
 
 use bellman::groth16::{
-    create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof, Parameters,
-    PreparedVerifyingKey, Proof, VerifyingKey,
+    create_random_proof, generate_random_parameters, prepare_verifying_key, verify_proof,
+    Parameters, PreparedVerifyingKey, Proof, VerifyingKey,
 };
 use bls12_381::{Bls12, Scalar};
 use ff::PrimeField;
@@ -62,8 +62,11 @@ pub fn scalar_to_hex(s: &Scalar) -> String {
 /// Parse a canonical (fully reduced) field element from hex.
 pub fn scalar_from_hex(s: &str) -> Result<Scalar, String> {
     let bytes = hex::decode(s).map_err(|_| "Invalid hex encoding".to_string())?;
-    let arr: [u8; 32] = bytes.try_into().map_err(|_| "Field element must be 32 bytes".to_string())?;
-    Option::<Scalar>::from(Scalar::from_repr(arr)).ok_or_else(|| "Non-canonical field element".to_string())
+    let arr: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| "Field element must be 32 bytes".to_string())?;
+    Option::<Scalar>::from(Scalar::from_repr(arr))
+        .ok_or_else(|| "Non-canonical field element".to_string())
 }
 
 /// serde helper: serialize `Vec<u8>` as a hex string.
@@ -82,7 +85,10 @@ pub mod hex_bytes {
 
 fn read_proof(bytes: &[u8]) -> Result<Proof<Bls12>, String> {
     if bytes.len() != PROOF_BYTES {
-        return Err(format!("Proof must be exactly {PROOF_BYTES} bytes, got {}", bytes.len()));
+        return Err(format!(
+            "Proof must be exactly {PROOF_BYTES} bytes, got {}",
+            bytes.len()
+        ));
     }
     Proof::read(bytes).map_err(|e| format!("Malformed proof: {e}"))
 }
@@ -116,10 +122,16 @@ impl Verifier {
 
     /// Check a fleet-setup proof: "`commitment` opens to a legal fleet that
     /// lies inside a `board_size` x `board_size` board".
-    pub fn verify_setup(&self, commitment: &Scalar, board_size: u8, proof: &[u8]) -> Result<(), String> {
+    pub fn verify_setup(
+        &self,
+        commitment: &Scalar,
+        board_size: u8,
+        proof: &[u8],
+    ) -> Result<(), String> {
         let proof = read_proof(proof)?;
         let inputs = [*commitment, circuits::u2s(board_size)];
-        verify_proof(&self.setup_pvk, &proof, &inputs).map_err(|_| "Invalid setup proof".to_string())
+        verify_proof(&self.setup_pvk, &proof, &inputs)
+            .map_err(|_| "Invalid setup proof".to_string())
     }
 
     /// Check a shot-response proof. The *verifier* supplies `old`, `x`, `y`
@@ -136,7 +148,14 @@ impl Verifier {
         proof: &[u8],
     ) -> Result<(), String> {
         let proof = read_proof(proof)?;
-        let inputs = [*old, *new, circuits::u2s(x), circuits::u2s(y), circuits::b2s(hit), circuits::b2s(alive)];
+        let inputs = [
+            *old,
+            *new,
+            circuits::u2s(x),
+            circuits::u2s(y),
+            circuits::b2s(hit),
+            circuits::b2s(alive),
+        ];
         verify_proof(&self.shot_pvk, &proof, &inputs).map_err(|_| "Invalid shot proof".to_string())
     }
 
@@ -151,7 +170,10 @@ impl Verifier {
         let mut magic = [0u8; 9];
         r.read_exact(&mut magic)?;
         if &magic[..8] != KEYS_MAGIC || magic[8] != b'V' {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not a FleetChain verifier-key file"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "not a FleetChain verifier-key file",
+            ));
         }
         let setup_vk = VerifyingKey::read(&mut r)?;
         let shot_vk = VerifyingKey::read(&mut r)?;
@@ -190,8 +212,15 @@ impl ZkSystem {
             .map_err(|e| format!("setup circuit parameter generation failed: {e}"))?;
         let shot_params = generate_random_parameters::<Bls12, _, _>(ShotCircuit::default(), rng)
             .map_err(|e| format!("shot circuit parameter generation failed: {e}"))?;
-        let verifier = Arc::new(Verifier::new(setup_params.vk.clone(), shot_params.vk.clone()));
-        Ok(ZkSystem { setup_params, shot_params, verifier })
+        let verifier = Arc::new(Verifier::new(
+            setup_params.vk.clone(),
+            shot_params.vk.clone(),
+        ));
+        Ok(ZkSystem {
+            setup_params,
+            shot_params,
+            verifier,
+        })
     }
 
     /// Process-wide development system, generated once on first use.
@@ -213,12 +242,22 @@ impl ZkSystem {
         let mut magic = [0u8; 9];
         r.read_exact(&mut magic)?;
         if &magic[..8] != KEYS_MAGIC || magic[8] != b'P' {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not a FleetChain proving-key file"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "not a FleetChain proving-key file",
+            ));
         }
         let setup_params = Parameters::read(&mut r, true)?;
         let shot_params = Parameters::read(&mut r, true)?;
-        let verifier = Arc::new(Verifier::new(setup_params.vk.clone(), shot_params.vk.clone()));
-        Ok(ZkSystem { setup_params, shot_params, verifier })
+        let verifier = Arc::new(Verifier::new(
+            setup_params.vk.clone(),
+            shot_params.vk.clone(),
+        ));
+        Ok(ZkSystem {
+            setup_params,
+            shot_params,
+            verifier,
+        })
     }
 
     pub(crate) fn prove_setup(&self, c: SetupCircuit) -> Result<Vec<u8>, String> {

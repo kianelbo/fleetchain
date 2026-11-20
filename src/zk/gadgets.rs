@@ -26,7 +26,10 @@ pub struct Lc {
 
 impl Lc {
     pub fn zero() -> Self {
-        Lc { terms: vec![], val: Some(Scalar::ZERO) }
+        Lc {
+            terms: vec![],
+            val: Some(Scalar::ZERO),
+        }
     }
 
     pub fn constant(c: Scalar) -> Self {
@@ -37,7 +40,10 @@ impl Lc {
     }
 
     pub fn var(v: Variable, val: Option<Scalar>) -> Self {
-        Lc { terms: vec![(v, Scalar::ONE)], val }
+        Lc {
+            terms: vec![(v, Scalar::ONE)],
+            val,
+        }
     }
 
     pub fn value(&self) -> Option<Scalar> {
@@ -49,7 +55,11 @@ impl Lc {
             return;
         }
         let idx = v.get_unchecked();
-        if let Some(pos) = self.terms.iter().position(|(w, _)| w.get_unchecked() == idx) {
+        if let Some(pos) = self
+            .terms
+            .iter()
+            .position(|(w, _)| w.get_unchecked() == idx)
+        {
             self.terms[pos].1 += c;
             if bool::from(self.terms[pos].1.is_zero()) {
                 self.terms.swap_remove(pos);
@@ -127,7 +137,11 @@ pub fn enforce_boolean<CS: ConstraintSystem<Scalar>>(cs: &mut CS, x: &Lc) {
 }
 
 /// Allocate a fresh variable constrained to `a * b`.
-pub fn mul<CS: ConstraintSystem<Scalar>>(cs: &mut CS, a: &Lc, b: &Lc) -> Result<Lc, SynthesisError> {
+pub fn mul<CS: ConstraintSystem<Scalar>>(
+    cs: &mut CS,
+    a: &Lc,
+    b: &Lc,
+) -> Result<Lc, SynthesisError> {
     let val = a.val.zip(b.val).map(|(x, y)| x * y);
     let out = alloc(cs, val)?;
     let (la, lb, lo) = (a.to_bellman(), b.to_bellman(), out.to_bellman());
@@ -143,11 +157,18 @@ pub fn mul<CS: ConstraintSystem<Scalar>>(cs: &mut CS, a: &Lc, b: &Lc) -> Result<
 pub fn is_zero<CS: ConstraintSystem<Scalar>>(cs: &mut CS, v: &Lc) -> Result<Lc, SynthesisError> {
     let inv = alloc(
         &mut cs.namespace(|| "inv"),
-        v.val.map(|x| Option::<Scalar>::from(x.invert()).unwrap_or(Scalar::ZERO)),
+        v.val
+            .map(|x| Option::<Scalar>::from(x.invert()).unwrap_or(Scalar::ZERO)),
     )?;
     let out = alloc(
         &mut cs.namespace(|| "out"),
-        v.val.map(|x| if bool::from(x.is_zero()) { Scalar::ONE } else { Scalar::ZERO }),
+        v.val.map(|x| {
+            if bool::from(x.is_zero()) {
+                Scalar::ONE
+            } else {
+                Scalar::ZERO
+            }
+        }),
     )?;
     let (lv, li, lo) = (v.to_bellman(), inv.to_bellman(), out.to_bellman());
     cs.enforce(
@@ -170,9 +191,18 @@ pub fn enforce_nonzero_flag<CS: ConstraintSystem<Scalar>>(
     flag: &Lc,
 ) -> Result<(), SynthesisError> {
     enforce_boolean(cs, flag);
-    let inv = alloc(cs, v.val.map(|x| Option::<Scalar>::from(x.invert()).unwrap_or(Scalar::ZERO)))?;
+    let inv = alloc(
+        cs,
+        v.val
+            .map(|x| Option::<Scalar>::from(x.invert()).unwrap_or(Scalar::ZERO)),
+    )?;
     let (lv, li, lf) = (v.to_bellman(), inv.to_bellman(), flag.to_bellman());
-    cs.enforce(|| "v*inv = flag", |lc| lc + &lv, |lc| lc + &li, |lc| lc + &lf);
+    cs.enforce(
+        || "v*inv = flag",
+        |lc| lc + &lv,
+        |lc| lc + &li,
+        |lc| lc + &lf,
+    );
     Ok(())
 }
 
@@ -182,7 +212,10 @@ pub fn alloc_bit<CS: ConstraintSystem<Scalar>>(
     val: Option<bool>,
 ) -> Result<Lc, SynthesisError> {
     let bit = AllocatedBit::alloc(cs.namespace(|| "bit"), val)?;
-    Ok(Lc::var(bit.get_variable(), val.map(|b| if b { Scalar::ONE } else { Scalar::ZERO })))
+    Ok(Lc::var(
+        bit.get_variable(),
+        val.map(|b| if b { Scalar::ONE } else { Scalar::ZERO }),
+    ))
 }
 
 /// Constrain `v` to lie in `[0, 2^nbits)` by bit decomposition.

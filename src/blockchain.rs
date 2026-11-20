@@ -1,6 +1,6 @@
-use sha2::{Sha256, Digest};
-use serde::{Serialize, Deserialize};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs;
 use std::path::Path;
@@ -201,7 +201,10 @@ impl Blockchain {
     }
 
     pub fn get_transaction_count(&self) -> usize {
-        self.chain.iter().map(|block| block.transactions.len()).sum()
+        self.chain
+            .iter()
+            .map(|block| block.transactions.len())
+            .sum()
     }
 
     /// Get the number of unspent shot UTXOs for a given player
@@ -247,8 +250,7 @@ impl Blockchain {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize blockchain: {}", e))?;
 
-        fs::write(path, json)
-            .map_err(|e| format!("Failed to write blockchain file: {}", e))?;
+        fs::write(path, json).map_err(|e| format!("Failed to write blockchain file: {}", e))?;
 
         Ok(())
     }

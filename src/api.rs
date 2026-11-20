@@ -11,16 +11,8 @@ use crate::blockchain::{Block, Transaction};
 use crate::coordinator::{ShotOutcome, ShotResponse};
 use crate::game::{HitReport, ShotRecord};
 use crate::network::{
-    NetworkNode,
-    RegisterPlayerRequest,
-    FireShotRequest,
-    MineRequest,
-    ShotBalanceRequest,
-    PendingShotsRequest,
-    ApiResponse,
-    Peer,
-    BlockchainInfo,
-    NodeInfo,
+    ApiResponse, BlockchainInfo, FireShotRequest, MineRequest, NetworkNode, NodeInfo, Peer,
+    PendingShotsRequest, RegisterPlayerRequest, ShotBalanceRequest,
 };
 
 /// Application state shared across handlers
@@ -33,7 +25,6 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/blockchain", get(get_blockchain))
         .route("/api/block", post(receive_block))
         .route("/api/transaction", post(receive_transaction))
-    
         // Game endpoints
         .route("/api/register", post(register_player))
         .route("/api/fire", post(fire_shot))
@@ -43,24 +34,19 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/zk", get(get_zk_info))
         .route("/api/mine", post(mine_for_shots))
         .route("/api/shots", post(get_shot_balance))
-
         // Network endpoints
         .route("/api/peers", get(get_peers))
         .route("/api/peers", post(add_peer))
         .route("/api/sync", post(sync_blockchain))
-
         // Info endpoints
         .route("/api/info", get(get_node_info))
         .route("/api/stats", get(get_game_stats))
-
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
 
 /// Get the entire blockchain
-async fn get_blockchain(
-    State(node): State<AppState>,
-) -> Json<crate::blockchain::Blockchain> {
+async fn get_blockchain(State(node): State<AppState>) -> Json<crate::blockchain::Blockchain> {
     let coordinator = node.coordinator.read().await;
     Json(coordinator.blockchain.clone())
 }
@@ -71,7 +57,7 @@ async fn receive_block(
     Json(block): Json<Block>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     let mut coordinator = node.coordinator.write().await;
-    
+
     // Validate the block
     if block.index != coordinator.blockchain.chain.len() as u64 {
         return (
@@ -87,7 +73,10 @@ async fn receive_block(
         );
     }
 
-    if !block.hash.starts_with(&"0".repeat(coordinator.blockchain.difficulty)) {
+    if !block
+        .hash
+        .starts_with(&"0".repeat(coordinator.blockchain.difficulty))
+    {
         return (
             StatusCode::BAD_REQUEST,
             Json(ApiResponse::error("Invalid proof of work".to_string())),
@@ -100,7 +89,10 @@ async fn receive_block(
 
     // Save blockchain after receiving new block
     if let Err(e) = coordinator.save() {
-        eprintln!("Warning: Failed to save blockchain after receiving block: {}", e);
+        eprintln!(
+            "Warning: Failed to save blockchain after receiving block: {}",
+            e
+        );
     }
 
     (
@@ -119,7 +111,10 @@ async fn receive_transaction(
 
     // Save blockchain after receiving new transaction
     if let Err(e) = coordinator.save() {
-        eprintln!("Warning: Failed to save blockchain after receiving transaction: {}", e);
+        eprintln!(
+            "Warning: Failed to save blockchain after receiving transaction: {}",
+            e
+        );
     }
 
     (
@@ -142,12 +137,12 @@ async fn register_player(
     ) {
         Ok(_) => (
             StatusCode::OK,
-            Json(ApiResponse::success(format!("Player {} registered", req.player_id))),
+            Json(ApiResponse::success(format!(
+                "Player {} registered",
+                req.player_id
+            ))),
         ),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::error(e)),
-        ),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(ApiResponse::error(e))),
     }
 }
 
@@ -175,7 +170,12 @@ async fn get_pending_shots(
             Json(ApiResponse::error("Player not found".to_string())),
         );
     }
-    (StatusCode::OK, Json(ApiResponse::success(coordinator.pending_shots(&req.player_id))))
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success(
+            coordinator.pending_shots(&req.player_id),
+        )),
+    )
 }
 
 /// The public shot log and every verified response
@@ -183,7 +183,10 @@ async fn get_results(
     State(node): State<AppState>,
 ) -> Json<ApiResponse<(Vec<ShotRecord>, Vec<ShotResponse>)>> {
     let coordinator = node.coordinator.read().await;
-    Json(ApiResponse::success((coordinator.shot_log.clone(), coordinator.responses.clone())))
+    Json(ApiResponse::success((
+        coordinator.shot_log.clone(),
+        coordinator.responses.clone(),
+    )))
 }
 
 /// Fingerprint of the verifying keys this node checks proofs against
@@ -208,10 +211,7 @@ async fn get_shot_balance(
 
     let count = coordinator.blockchain.get_unspent_shots(&req.player_id) as u32;
 
-    (
-        StatusCode::OK,
-        Json(ApiResponse::success(count)),
-    )
+    (StatusCode::OK, Json(ApiResponse::success(count)))
 }
 
 /// Fire a shot
@@ -227,13 +227,15 @@ async fn fire_shot(
             if let Some(transaction) = coordinator.blockchain.pending_transactions.last() {
                 let tx = transaction.clone();
                 drop(coordinator); // Release the lock before broadcasting
-                
+
                 // Broadcast to peers
                 let _ = node.broadcast_transaction(&tx).await;
-                
+
                 (
                     StatusCode::OK,
-                    Json(ApiResponse::success("Shot fired and broadcasted".to_string())),
+                    Json(ApiResponse::success(
+                        "Shot fired and broadcasted".to_string(),
+                    )),
                 )
             } else {
                 (
@@ -242,10 +244,7 @@ async fn fire_shot(
                 )
             }
         }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::error(e)),
-        ),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(ApiResponse::error(e))),
     }
 }
 
@@ -262,32 +261,21 @@ async fn mine_for_shots(
             if let Some(block) = coordinator.blockchain.chain.last() {
                 let new_block = block.clone();
                 drop(coordinator); // Release the lock before broadcasting
-                
+
                 // Broadcast the new block to peers
                 let _ = node.broadcast_block(&new_block).await;
-                
-                (
-                    StatusCode::OK,
-                    Json(ApiResponse::success(shots)),
-                )
+
+                (StatusCode::OK, Json(ApiResponse::success(shots)))
             } else {
-                (
-                    StatusCode::OK,
-                    Json(ApiResponse::success(shots)),
-                )
+                (StatusCode::OK, Json(ApiResponse::success(shots)))
             }
         }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::error(e)),
-        ),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(ApiResponse::error(e))),
     }
 }
 
 /// Get all connected peers
-async fn get_peers(
-    State(node): State<AppState>,
-) -> Json<Vec<Peer>> {
+async fn get_peers(State(node): State<AppState>) -> Json<Vec<Peer>> {
     let peers = node.get_peers().await;
     Json(peers)
 }
@@ -298,7 +286,7 @@ async fn add_peer(
     Json(peer): Json<Peer>,
 ) -> (StatusCode, Json<ApiResponse<String>>) {
     node.add_peer(peer.clone()).await;
-    
+
     (
         StatusCode::OK,
         Json(ApiResponse::success(format!("Peer {} added", peer.url()))),
@@ -306,9 +294,7 @@ async fn add_peer(
 }
 
 /// Synchronize blockchain with all peers
-async fn sync_blockchain(
-    State(node): State<AppState>,
-) -> (StatusCode, Json<ApiResponse<String>>) {
+async fn sync_blockchain(State(node): State<AppState>) -> (StatusCode, Json<ApiResponse<String>>) {
     match node.sync_with_network().await {
         Ok(_) => (
             StatusCode::OK,
@@ -322,9 +308,7 @@ async fn sync_blockchain(
 }
 
 /// Get node information
-async fn get_node_info(
-    State(node): State<AppState>,
-) -> Json<NodeInfo> {
+async fn get_node_info(State(node): State<AppState>) -> Json<NodeInfo> {
     let coordinator = node.coordinator.read().await;
     let peers = node.get_peers().await;
 

@@ -1,10 +1,10 @@
+use crate::blockchain::{Block, Blockchain, Transaction};
+use crate::coordinator::GameCoordinator;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
-use crate::blockchain::{Block, Transaction, Blockchain};
-use crate::coordinator::GameCoordinator;
 
 /// Represents a peer node in the network
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -51,9 +51,11 @@ impl NetworkNode {
     ) -> Self {
         Self {
             peers: Arc::new(RwLock::new(HashSet::new())),
-            coordinator: Arc::new(RwLock::new(
-                GameCoordinator::with_persistence(grid_size, difficulty, blockchain_path)
-            )),
+            coordinator: Arc::new(RwLock::new(GameCoordinator::with_persistence(
+                grid_size,
+                difficulty,
+                blockchain_path,
+            ))),
             node_id,
             port,
         }
@@ -85,11 +87,7 @@ impl NetworkNode {
 
         for peer in peers {
             let url = format!("{}/api/block", peer.url());
-            let _ = client
-                .post(&url)
-                .json(block)
-                .send()
-                .await;
+            let _ = client.post(&url).json(block).send().await;
             // Ignore errors for individual peers
         }
 
@@ -103,11 +101,7 @@ impl NetworkNode {
 
         for peer in peers {
             let url = format!("{}/api/transaction", peer.url());
-            let _ = client
-                .post(&url)
-                .json(transaction)
-                .send()
-                .await;
+            let _ = client.post(&url).json(transaction).send().await;
             // Ignore errors for individual peers
         }
 
@@ -132,11 +126,12 @@ impl NetworkNode {
 
         // Replace our chain if peer's chain is longer and valid
         let mut coordinator = self.coordinator.write().await;
-        if peer_blockchain.chain.len() > coordinator.blockchain.chain.len() 
-            && peer_blockchain.is_chain_valid() {
+        if peer_blockchain.chain.len() > coordinator.blockchain.chain.len()
+            && peer_blockchain.is_chain_valid()
+        {
             coordinator.blockchain = peer_blockchain;
             println!("✓ Synchronized blockchain from peer {}", peer.url());
-            
+
             // Save the synchronized blockchain
             if let Err(e) = coordinator.save() {
                 eprintln!("Warning: Failed to save synchronized blockchain: {}", e);
@@ -149,7 +144,7 @@ impl NetworkNode {
     /// Discover and sync with all peers
     pub async fn sync_with_network(&self) -> Result<(), String> {
         let peers = self.get_peers().await;
-        
+
         for peer in peers {
             if let Err(e) = self.sync_with_peer(&peer).await {
                 eprintln!("Failed to sync with peer {}: {}", peer.url(), e);

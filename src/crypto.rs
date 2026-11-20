@@ -1,6 +1,6 @@
-use sha2::{Sha256, Digest};
-use rand::Rng;
 use hex;
+use rand::Rng;
+use sha2::{Digest, Sha256};
 
 /// Generate a random salt for commitment scheme
 pub fn generate_salt() -> String {
@@ -13,25 +13,21 @@ pub fn generate_salt() -> String {
 /// commitment = SHA256(board_positions || salt)
 pub fn create_commitment(positions: &[(u8, u8)], salt: &str) -> String {
     let mut hasher = Sha256::new();
-    
+
     // Serialize positions in a deterministic way
     let mut sorted_positions = positions.to_vec();
     sorted_positions.sort();
-    
+
     for (x, y) in sorted_positions {
         hasher.update(&[x, y]);
     }
-    
+
     hasher.update(salt.as_bytes());
     hex::encode(hasher.finalize())
 }
 
 /// Verify a commitment against revealed positions and salt
-pub fn verify_commitment(
-    commitment: &str,
-    positions: &[(u8, u8)],
-    salt: &str,
-) -> bool {
+pub fn verify_commitment(commitment: &str, positions: &[(u8, u8)], salt: &str) -> bool {
     let calculated = create_commitment(positions, salt);
     calculated == commitment
 }

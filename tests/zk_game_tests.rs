@@ -38,7 +38,10 @@ fn registration_stores_only_public_data() {
     assert_eq!(p.commitment, s.commitment());
     assert_eq!(p.initial_commitment, s.commitment());
     assert!(p.alive && !p.forfeited);
-    assert!(c.grid.cells.is_empty(), "the shared grid must not record who is where");
+    assert!(
+        c.grid.cells.is_empty(),
+        "the shared grid must not record who is where"
+    );
     assert_eq!(c.blockchain.get_unspent_shots("alice"), 1);
 }
 
@@ -58,9 +61,15 @@ fn someone_elses_registration_cannot_be_copied() {
     let mut c = game();
     let victim = FleetSecret::from_ships(&valid_fleet(), 10).unwrap();
     let proof = victim.prove_setup(sys()).unwrap();
-    c.register_player("victim".into(), victim.commitment_hex(), &proof).unwrap();
-    let err = c.register_player("copycat".into(), victim.commitment_hex(), &proof).unwrap_err();
-    assert!(err.contains("already registered") || err.contains("Commitment"), "{err}");
+    c.register_player("victim".into(), victim.commitment_hex(), &proof)
+        .unwrap();
+    let err = c
+        .register_player("copycat".into(), victim.commitment_hex(), &proof)
+        .unwrap_err();
+    assert!(
+        err.contains("already registered") || err.contains("Commitment"),
+        "{err}"
+    );
     assert_eq!(c.players.len(), 1);
 }
 
@@ -70,7 +79,9 @@ fn registration_proof_is_tied_to_the_board_size() {
     let secret = FleetSecret::from_ships(&valid_fleet(), 10).unwrap();
     let proof = secret.prove_setup(sys()).unwrap();
     let mut big = GameCoordinator::new(20, 1);
-    assert!(big.register_player("p".into(), secret.commitment_hex(), &proof).is_err());
+    assert!(big
+        .register_player("p".into(), secret.commitment_hex(), &proof)
+        .is_err());
     assert_eq!(big.players.len(), 0);
 }
 
@@ -78,15 +89,35 @@ fn registration_proof_is_tied_to_the_board_size() {
 fn malicious_player_cannot_register_a_fleet_that_hangs_off_the_board() {
     // Skip the client-side checks and run the real prover on an illegal fleet.
     let placements = vec![
-        ShipPlacement { x: 0, y: 8, vertical: true }, // y = 8..=11
-        ShipPlacement { x: 2, y: 0, vertical: true },
-        ShipPlacement { x: 4, y: 0, vertical: true },
-        ShipPlacement { x: 6, y: 0, vertical: false },
+        ShipPlacement {
+            x: 0,
+            y: 8,
+            vertical: true,
+        }, // y = 8..=11
+        ShipPlacement {
+            x: 2,
+            y: 0,
+            vertical: true,
+        },
+        ShipPlacement {
+            x: 4,
+            y: 0,
+            vertical: true,
+        },
+        ShipPlacement {
+            x: 6,
+            y: 0,
+            vertical: false,
+        },
     ];
     let salt = Scalar::random(&mut OsRng);
     let c0 = commit(salt, &derive_segments(&placements));
     let proof = create_random_proof(
-        SetupCircuit { commitment: Some(c0), board_size: Some(10), witness: Some(SetupWitness { salt, placements }) },
+        SetupCircuit {
+            commitment: Some(c0),
+            board_size: Some(10),
+            witness: Some(SetupWitness { salt, placements }),
+        },
         &sys().setup_params,
         &mut OsRng,
     )
@@ -95,7 +126,9 @@ fn malicious_player_cannot_register_a_fleet_that_hangs_off_the_board() {
     proof.write(&mut bytes).unwrap();
 
     let mut c = game();
-    assert!(c.register_player("cheat".into(), scalar_to_hex(&c0), &bytes).is_err());
+    assert!(c
+        .register_player("cheat".into(), scalar_to_hex(&c0), &bytes)
+        .is_err());
     assert_eq!(c.players.len(), 0);
 }
 
@@ -113,7 +146,14 @@ fn every_other_player_owes_a_response_but_the_shooter_does_not() {
     assert_eq!(c.pending_shots("b").len(), 1);
     assert_eq!(c.pending_shots("c").len(), 1);
     assert_eq!(c.shot_log.len(), 1);
-    assert_eq!((c.shot_log[0].x, c.shot_log[0].y, c.shot_log[0].shooter.as_str()), (4, 4, "a"));
+    assert_eq!(
+        (
+            c.shot_log[0].x,
+            c.shot_log[0].y,
+            c.shot_log[0].shooter.as_str()
+        ),
+        (4, 4, "a")
+    );
 }
 
 #[test]
@@ -139,7 +179,16 @@ fn hit_and_miss_are_reported_per_defender_and_ledger_has_only_bits() {
     let json = serde_json::to_value(&c.responses[0]).unwrap();
     let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
     keys.sort();
-    assert_eq!(keys, ["is_alive", "is_hit", "new_commitment", "player_id", "shot_index"]);
+    assert_eq!(
+        keys,
+        [
+            "is_alive",
+            "is_hit",
+            "new_commitment",
+            "player_id",
+            "shot_index"
+        ]
+    );
     // Coordinator state tracks the defender's new commitment.
     assert_eq!(c.players["b"].commitment, b.commitment());
 }
@@ -234,7 +283,10 @@ fn a_response_cannot_be_replayed() {
     c.fire_shot("a".into(), 0, 0).unwrap();
     let mut replay = accepted.clone();
     replay.shot_index = 2;
-    assert!(c.report_hit(replay).unwrap_err().contains("Invalid shot proof"));
+    assert!(c
+        .report_hit(replay)
+        .unwrap_err()
+        .contains("Invalid shot proof"));
 }
 
 #[test]
@@ -270,7 +322,10 @@ fn defender_cannot_lie_about_hit_or_alive_and_state_is_untouched_by_rejections()
 
     let mut lie = honest.report.clone();
     lie.new_commitment = scalar_to_hex(&before);
-    assert!(c.report_hit(lie).unwrap_err().contains("must differ"), "reusing the old commitment");
+    assert!(
+        c.report_hit(lie).unwrap_err().contains("must differ"),
+        "reusing the old commitment"
+    );
 
     let mut lie = honest.report.clone();
     lie.new_commitment = "not hex".into();
@@ -304,16 +359,36 @@ fn malicious_defender_with_real_prover_cannot_report_a_miss_on_a_hit() {
     // The cheater registers legitimately (own salt, known fleet) and then
     // runs the REAL proving key with a lying claim. The proof must not verify.
     let placements = vec![
-        ShipPlacement { x: 0, y: 0, vertical: true },
-        ShipPlacement { x: 2, y: 0, vertical: true },
-        ShipPlacement { x: 4, y: 0, vertical: true },
-        ShipPlacement { x: 6, y: 0, vertical: false },
+        ShipPlacement {
+            x: 0,
+            y: 0,
+            vertical: true,
+        },
+        ShipPlacement {
+            x: 2,
+            y: 0,
+            vertical: true,
+        },
+        ShipPlacement {
+            x: 4,
+            y: 0,
+            vertical: true,
+        },
+        ShipPlacement {
+            x: 6,
+            y: 0,
+            vertical: false,
+        },
     ];
     let salt = Scalar::random(&mut OsRng);
     let segments = derive_segments(&placements);
     let c0 = commit(salt, &segments);
     let setup = create_random_proof(
-        SetupCircuit { commitment: Some(c0), board_size: Some(10), witness: Some(SetupWitness { salt, placements }) },
+        SetupCircuit {
+            commitment: Some(c0),
+            board_size: Some(10),
+            witness: Some(SetupWitness { salt, placements }),
+        },
         &sys().setup_params,
         &mut OsRng,
     )
@@ -323,7 +398,8 @@ fn malicious_defender_with_real_prover_cannot_report_a_miss_on_a_hit() {
 
     let mut c = game();
     register(&mut c, "a", &far_fleet()).unwrap();
-    c.register_player("cheat".into(), scalar_to_hex(&c0), &setup_bytes).unwrap();
+    c.register_player("cheat".into(), scalar_to_hex(&c0), &setup_bytes)
+        .unwrap();
 
     c.fire_shot("a".into(), 0, 1).unwrap(); // (0,1) really is a ship cell
     let shot = c.pending_shots("cheat")[0].clone();
@@ -339,7 +415,11 @@ fn malicious_defender_with_real_prover_cannot_report_a_miss_on_a_hit() {
             y: Some(shot.y),
             hit: Some(false),
             alive: Some(true),
-            witness: Some(ShotWitness { old_salt: salt, new_salt, segments: segments.clone() }),
+            witness: Some(ShotWitness {
+                old_salt: salt,
+                new_salt,
+                segments: segments.clone(),
+            }),
         },
         &sys().shot_params,
         &mut OsRng,
@@ -391,16 +471,27 @@ fn a_fleet_can_be_sunk_cell_by_cell_and_is_then_out_of_the_game() {
         c.fire_shot("a".into(), x, y).unwrap();
         let (hit, alive) = answer_next(&mut c, &mut b, "b");
         assert!(hit, "({x},{y})");
-        assert_eq!(alive, i + 1 < targets.len(), "alive flag after hit #{}", i + 1);
+        assert_eq!(
+            alive,
+            i + 1 < targets.len(),
+            "alive flag after hit #{}",
+            i + 1
+        );
         answer_next(&mut c, &mut d, "d"); // d answers each shot too
     }
 
     assert!(b.is_defeated());
     assert!(c.is_player_defeated("b"));
-    assert!(!c.players["b"].forfeited, "defeated by shots, not by timeout");
+    assert!(
+        !c.players["b"].forfeited,
+        "defeated by shots, not by timeout"
+    );
     assert_eq!(c.get_active_players().len(), 2);
     assert!(c.mine_for_shots("b").unwrap_err().contains("Defeated"));
-    assert!(c.fire_shot("b".into(), 0, 0).unwrap_err().contains("Defeated"));
+    assert!(c
+        .fire_shot("b".into(), 0, 0)
+        .unwrap_err()
+        .contains("Defeated"));
 
     // A sunk player owes nothing, and cannot respond.
     ensure_shots(&mut c, "a", 1);
@@ -435,7 +526,10 @@ fn silent_defenders_forfeit_when_a_deadline_is_set() {
     assert!(!c.get_active_players().contains(&"quiet".to_string()));
 
     // The forfeit is enforced on the next state-changing call.
-    assert!(c.fire_shot("quiet".into(), 1, 1).unwrap_err().contains("Defeated"));
+    assert!(c
+        .fire_shot("quiet".into(), 1, 1)
+        .unwrap_err()
+        .contains("Defeated"));
     assert!(c.players["quiet"].forfeited);
     // A late proof does not resurrect them.
     let shot = c.shot_log[0].clone();
@@ -461,9 +555,21 @@ fn no_deadline_by_default() {
 fn three_player_game_runs_to_a_single_survivor() {
     let mut c = game();
     let mut fleets = vec![
-        ("p1".to_string(), register(&mut c, "p1", &valid_fleet()).unwrap(), valid_fleet()),
-        ("p2".to_string(), register(&mut c, "p2", &horizontal_fleet()).unwrap(), horizontal_fleet()),
-        ("p3".to_string(), register(&mut c, "p3", &far_fleet()).unwrap(), far_fleet()),
+        (
+            "p1".to_string(),
+            register(&mut c, "p1", &valid_fleet()).unwrap(),
+            valid_fleet(),
+        ),
+        (
+            "p2".to_string(),
+            register(&mut c, "p2", &horizontal_fleet()).unwrap(),
+            horizontal_fleet(),
+        ),
+        (
+            "p3".to_string(),
+            register(&mut c, "p3", &far_fleet()).unwrap(),
+            far_fleet(),
+        ),
     ];
     // p3 hunts everyone down: it knows (in this test) both fleets.
     let mut targets: Vec<(u8, u8)> = cells(&fleets[0].2);

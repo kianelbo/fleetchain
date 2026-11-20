@@ -39,7 +39,11 @@ pub fn cells(ships: &[Ship]) -> Vec<(u8, u8)> {
 }
 
 /// Build the secret, prove it legal, and register it with `coord`.
-pub fn register(coord: &mut GameCoordinator, id: &str, ships: &[Ship]) -> Result<FleetSecret, String> {
+pub fn register(
+    coord: &mut GameCoordinator,
+    id: &str,
+    ships: &[Ship],
+) -> Result<FleetSecret, String> {
     let secret = FleetSecret::from_ships(ships, coord.grid.size)?;
     let proof = secret.prove_setup(sys())?;
     coord.register_player(id.to_string(), secret.commitment_hex(), &proof)?;
@@ -52,10 +56,20 @@ pub fn register_default(coord: &mut GameCoordinator, id: &str) -> FleetSecret {
 }
 
 /// Have `id` answer its oldest pending shot; returns (hit, alive).
-pub fn answer_next(coord: &mut GameCoordinator, secret: &mut FleetSecret, id: &str) -> (bool, bool) {
-    let shot = coord.pending_shots(id).into_iter().next().expect("a pending shot");
+pub fn answer_next(
+    coord: &mut GameCoordinator,
+    secret: &mut FleetSecret,
+    id: &str,
+) -> (bool, bool) {
+    let shot = coord
+        .pending_shots(id)
+        .into_iter()
+        .next()
+        .expect("a pending shot");
     let pending = secret.respond(sys(), id, &shot).expect("proving");
-    let out = coord.report_hit(pending.report.clone()).expect("coordinator accepts honest response");
+    let out = coord
+        .report_hit(pending.report.clone())
+        .expect("coordinator accepts honest response");
     secret.apply(pending);
     (out.is_hit, !out.defeated)
 }

@@ -2,7 +2,8 @@
 //! machine; only commitments, flags and proofs are ever sent out.
 
 use super::circuits::{
-    commit, derive_segments, Segment, SetupCircuit, SetupWitness, ShipPlacement, ShotCircuit, ShotWitness,
+    commit, derive_segments, Segment, SetupCircuit, SetupWitness, ShipPlacement, ShotCircuit,
+    ShotWitness,
 };
 use super::{scalar_from_hex, scalar_to_hex, ZkSystem, FLEET_CELLS, FLEET_SPEC};
 use crate::game::{HitReport, Ship, ShotRecord};
@@ -66,7 +67,8 @@ fn is_valid_ship_placement(positions: &[(u8, u8)]) -> bool {
     let mut p = positions.to_vec();
     p.sort_unstable();
     let consecutive = |get: fn(&(u8, u8)) -> u8| {
-        p.windows(2).all(|w| get(&w[1]) as u16 == get(&w[0]) as u16 + 1)
+        p.windows(2)
+            .all(|w| get(&w[1]) as u16 == get(&w[0]) as u16 + 1)
     };
     if p.iter().all(|&(_, y)| y == p[0].1) {
         return consecutive(|c| c.0);
@@ -108,7 +110,11 @@ impl FleetSecret {
                 let mut p = s.positions.clone();
                 p.sort_unstable();
                 let vertical = p.len() > 1 && p.iter().all(|&(x, _)| x == p[0].0);
-                ShipPlacement { x: p[0].0, y: p[0].1, vertical }
+                ShipPlacement {
+                    x: p[0].0,
+                    y: p[0].1,
+                    vertical,
+                }
             })
             .collect::<Vec<_>>();
         Self::from_placements(placements, board_size)
@@ -122,8 +128,16 @@ impl FleetSecret {
         let segments = derive_segments(&placements);
         debug_assert_eq!(segments.len(), FLEET_CELLS);
         for (p, &len) in placements.iter().zip(FLEET_SPEC.iter()) {
-            let end = if p.vertical { (p.x as u16, p.y as u16 + len as u16 - 1) } else { (p.x as u16 + len as u16 - 1, p.y as u16) };
-            if end.0 >= board_size as u16 || end.1 >= board_size as u16 || p.x >= board_size || p.y >= board_size {
+            let end = if p.vertical {
+                (p.x as u16, p.y as u16 + len as u16 - 1)
+            } else {
+                (p.x as u16 + len as u16 - 1, p.y as u16)
+            };
+            if end.0 >= board_size as u16
+                || end.1 >= board_size as u16
+                || p.x >= board_size
+                || p.y >= board_size
+            {
                 return Err(format!(
                     "Ship at ({}, {}) extends outside the {}x{} board",
                     p.x, p.y, board_size, board_size
@@ -132,7 +146,13 @@ impl FleetSecret {
         }
         let salt = Scalar::random(&mut OsRng);
         let commitment = commit(salt, &segments);
-        Ok(FleetSecret { board_size, placements, segments, salt, commitment })
+        Ok(FleetSecret {
+            board_size,
+            placements,
+            segments,
+            salt,
+            commitment,
+        })
     }
 
     /// A random legal fleet (ships may overlap). Handy for demos and bots.
@@ -171,21 +191,33 @@ impl FleetSecret {
 
     /// Restore from [`Self::to_json`], re-checking that everything is consistent.
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let f: SecretFile = serde_json::from_str(json).map_err(|e| format!("Bad secret file: {e}"))?;
+        let f: SecretFile =
+            serde_json::from_str(json).map_err(|e| format!("Bad secret file: {e}"))?;
         // Re-derive the fleet from the placements and check bounds.
         let fresh = Self::from_placements(f.placements.clone(), f.board_size)?;
         let layout = derive_segments(&f.placements);
         if f.segments.len() != FLEET_CELLS
-            || f.segments.iter().zip(&layout).any(|(a, b)| (a.x, a.y) != (b.x, b.y))
+            || f.segments
+                .iter()
+                .zip(&layout)
+                .any(|(a, b)| (a.x, a.y) != (b.x, b.y))
         {
-            return Err("Secret file is inconsistent: segments do not match placements".to_string());
+            return Err(
+                "Secret file is inconsistent: segments do not match placements".to_string(),
+            );
         }
         let salt = scalar_from_hex(&f.salt)?;
         let commitment = commit(salt, &f.segments);
         if scalar_to_hex(&commitment) != f.commitment {
             return Err("Secret file is corrupted: commitment does not match".to_string());
         }
-        Ok(FleetSecret { board_size: f.board_size, placements: fresh.placements, segments: f.segments, salt, commitment })
+        Ok(FleetSecret {
+            board_size: f.board_size,
+            placements: fresh.placements,
+            segments: f.segments,
+            salt,
+            commitment,
+        })
     }
 
     pub fn board_size(&self) -> u8 {
@@ -214,14 +246,22 @@ impl FleetSecret {
         sys.prove_setup(SetupCircuit {
             commitment: Some(self.commitment),
             board_size: Some(self.board_size),
-            witness: Some(SetupWitness { salt: self.salt, placements: self.placements.clone() }),
+            witness: Some(SetupWitness {
+                salt: self.salt,
+                placements: self.placements.clone(),
+            }),
         })
     }
 
     /// Answer a shot: work out hit/alive locally and prove it against the
     /// current commitment. Does not change `self`; call [`Self::apply`] once
     /// the coordinator accepted the response.
-    pub fn respond(&self, sys: &ZkSystem, player_id: &str, shot: &ShotRecord) -> Result<PendingResponse, String> {
+    pub fn respond(
+        &self,
+        sys: &ZkSystem,
+        player_id: &str,
+        shot: &ShotRecord,
+    ) -> Result<PendingResponse, String> {
         let mut next = self.segments.clone();
         let mut hit = false;
         for s in next.iter_mut() {
@@ -241,7 +281,11 @@ impl FleetSecret {
             y: Some(shot.y),
             hit: Some(hit),
             alive: Some(alive),
-            witness: Some(ShotWitness { old_salt: self.salt, new_salt: next_salt, segments: self.segments.clone() }),
+            witness: Some(ShotWitness {
+                old_salt: self.salt,
+                new_salt: next_salt,
+                segments: self.segments.clone(),
+            }),
         })?;
 
         Ok(PendingResponse {

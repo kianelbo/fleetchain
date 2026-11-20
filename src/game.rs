@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Represents a ship on the grid
@@ -12,12 +12,18 @@ pub struct Ship {
 impl Ship {
     pub fn new(id: String, positions: Vec<(u8, u8)>) -> Self {
         let hits = vec![false; positions.len()];
-        Self { id, positions, hits }
+        Self {
+            id,
+            positions,
+            hits,
+        }
     }
 
     #[allow(dead_code)]
     pub fn is_hit_at(&self, x: u8, y: u8) -> bool {
-        self.positions.iter().position(|&pos| pos == (x, y))
+        self.positions
+            .iter()
+            .position(|&pos| pos == (x, y))
             .map(|idx| self.hits[idx])
             .unwrap_or(false)
     }
@@ -61,7 +67,8 @@ impl Grid {
         }
 
         for &pos in positions {
-            self.cells.entry(pos)
+            self.cells
+                .entry(pos)
                 .or_insert_with(Vec::new)
                 .push(player_id.to_string());
         }
@@ -71,9 +78,7 @@ impl Grid {
 
     #[allow(dead_code)]
     pub fn get_players_at(&self, x: u8, y: u8) -> Vec<String> {
-        self.cells.get(&(x, y))
-            .cloned()
-            .unwrap_or_default()
+        self.cells.get(&(x, y)).cloned().unwrap_or_default()
     }
 }
 
@@ -118,7 +123,8 @@ impl Player {
 
     #[allow(dead_code)]
     pub fn get_all_ship_positions(&self) -> Vec<(u8, u8)> {
-        self.ships.iter()
+        self.ships
+            .iter()
             .flat_map(|ship| ship.positions.clone())
             .collect()
     }

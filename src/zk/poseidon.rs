@@ -55,7 +55,8 @@ fn params() -> &'static Params {
                     h.update(DOMAIN);
                     h.update(counter.to_le_bytes());
                     h.update([half]);
-                    wide[half as usize * 32..(half as usize + 1) * 32].copy_from_slice(&h.finalize());
+                    wide[half as usize * 32..(half as usize + 1) * 32]
+                        .copy_from_slice(&h.finalize());
                 }
                 *lane = Scalar::from_bytes_wide(&wide);
                 counter += 1;
@@ -105,7 +106,11 @@ pub fn permute(state: &mut [Scalar; T]) {
 
 /// Hash a slice of field elements to one field element.
 pub fn hash(inputs: &[Scalar]) -> Scalar {
-    let mut state = [Scalar::from(inputs.len() as u64), Scalar::ZERO, Scalar::ZERO];
+    let mut state = [
+        Scalar::from(inputs.len() as u64),
+        Scalar::ZERO,
+        Scalar::ZERO,
+    ];
     if inputs.is_empty() {
         permute(&mut state);
     }
@@ -124,8 +129,16 @@ pub fn hash(inputs: &[Scalar]) -> Scalar {
 fn sbox_gadget<CS: ConstraintSystem<Scalar>>(cs: &mut CS, x: &Lc) -> Result<Lc, SynthesisError> {
     let x2 = alloc(&mut cs.namespace(|| "x2"), x.value().map(|v| v.square()))?;
     let x4 = alloc(&mut cs.namespace(|| "x4"), x2.value().map(|v| v.square()))?;
-    let x5 = alloc(&mut cs.namespace(|| "x5"), x4.value().zip(x.value()).map(|(a, b)| a * b))?;
-    let (lx, l2, l4, l5) = (x.to_bellman(), x2.to_bellman(), x4.to_bellman(), x5.to_bellman());
+    let x5 = alloc(
+        &mut cs.namespace(|| "x5"),
+        x4.value().zip(x.value()).map(|(a, b)| a * b),
+    )?;
+    let (lx, l2, l4, l5) = (
+        x.to_bellman(),
+        x2.to_bellman(),
+        x4.to_bellman(),
+        x5.to_bellman(),
+    );
     cs.enforce(|| "x^2", |lc| lc + &lx, |lc| lc + &lx, |lc| lc + &l2);
     cs.enforce(|| "x^4", |lc| lc + &l2, |lc| lc + &l2, |lc| lc + &l4);
     cs.enforce(|| "x^5", |lc| lc + &l4, |lc| lc + &lx, |lc| lc + &l5);
@@ -166,7 +179,11 @@ pub fn hash_gadget<CS: ConstraintSystem<Scalar>>(
     cs: &mut CS,
     inputs: &[Lc],
 ) -> Result<Lc, SynthesisError> {
-    let mut state = [Lc::constant(Scalar::from(inputs.len() as u64)), Lc::zero(), Lc::zero()];
+    let mut state = [
+        Lc::constant(Scalar::from(inputs.len() as u64)),
+        Lc::zero(),
+        Lc::zero(),
+    ];
     if inputs.is_empty() {
         permute_gadget(&mut cs.namespace(|| "perm"), &mut state)?;
     }

@@ -2,13 +2,15 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use tower::util::ServiceExt;
-use std::sync::Arc;
 use fleetchain::api::create_router;
-use fleetchain::network::{NetworkNode, RegisterPlayerRequest, FireShotRequest, MineRequest, PendingShotsRequest, Peer};
-use fleetchain::game::ShotRecord;
-use fleetchain::zk::FleetSecret;
 use fleetchain::game::Ship;
+use fleetchain::game::ShotRecord;
+use fleetchain::network::{
+    FireShotRequest, MineRequest, NetworkNode, Peer, PendingShotsRequest, RegisterPlayerRequest,
+};
+use fleetchain::zk::FleetSecret;
+use std::sync::Arc;
+use tower::util::ServiceExt;
 mod common;
 use fleetchain::blockchain::{Block, Transaction};
 
@@ -53,8 +55,13 @@ async fn post_json(app: axum::Router, uri: &str, body: String) -> (StatusCode, s
         .await
         .unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -69,7 +76,12 @@ async fn test_register_player() {
         setup_proof: secret.prove_setup(common::sys()).unwrap(),
     };
 
-    let (status, _) = post_json(app, "/api/register", serde_json::to_string(&register_req).unwrap()).await;
+    let (status, _) = post_json(
+        app,
+        "/api/register",
+        serde_json::to_string(&register_req).unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(node.coordinator.read().await.players.len(), 1);
 }
@@ -88,7 +100,12 @@ async fn test_register_player_invalid_commitment() {
         setup_proof: secret.prove_setup(common::sys()).unwrap(),
     };
 
-    let (status, _) = post_json(app, "/api/register", serde_json::to_string(&register_req).unwrap()).await;
+    let (status, _) = post_json(
+        app,
+        "/api/register",
+        serde_json::to_string(&register_req).unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(node.coordinator.read().await.players.len(), 0);
 }
@@ -121,7 +138,12 @@ async fn test_zero_knowledge_round_trip_over_http() {
             board_commitment: s.commitment_hex(),
             setup_proof: s.prove_setup(sys).unwrap(),
         };
-        let (status, _) = post_json(create_router(node.clone()), "/api/register", serde_json::to_string(&req).unwrap()).await;
+        let (status, _) = post_json(
+            create_router(node.clone()),
+            "/api/register",
+            serde_json::to_string(&req).unwrap(),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK);
     }
 
@@ -129,7 +151,12 @@ async fn test_zero_knowledge_round_trip_over_http() {
     let (status, _) = post_json(
         create_router(node.clone()),
         "/api/fire",
-        serde_json::to_string(&FireShotRequest { player_id: "attacker".into(), target_x: 0, target_y: 1 }).unwrap(),
+        serde_json::to_string(&FireShotRequest {
+            player_id: "attacker".into(),
+            target_x: 0,
+            target_y: 1,
+        })
+        .unwrap(),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -138,7 +165,10 @@ async fn test_zero_knowledge_round_trip_over_http() {
     let (status, body) = post_json(
         create_router(node.clone()),
         "/api/pending",
-        serde_json::to_string(&PendingShotsRequest { player_id: "defender".into() }).unwrap(),
+        serde_json::to_string(&PendingShotsRequest {
+            player_id: "defender".into(),
+        })
+        .unwrap(),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -150,37 +180,65 @@ async fn test_zero_knowledge_round_trip_over_http() {
     let (_, body) = post_json(
         create_router(node.clone()),
         "/api/pending",
-        serde_json::to_string(&PendingShotsRequest { player_id: "attacker".into() }).unwrap(),
+        serde_json::to_string(&PendingShotsRequest {
+            player_id: "attacker".into(),
+        })
+        .unwrap(),
     )
     .await;
     assert_eq!(body["data"].as_array().unwrap().len(), 0);
 
     // ... and answers with a proof
     let pr = defender.respond(sys, "defender", &pending[0]).unwrap();
-    let (status, body) = post_json(create_router(node.clone()), "/api/respond", serde_json::to_string(&pr.report).unwrap()).await;
+    let (status, body) = post_json(
+        create_router(node.clone()),
+        "/api/respond",
+        serde_json::to_string(&pr.report).unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["is_hit"], true);
     defender.apply(pr);
 
     // The same answer cannot be submitted twice.
-    let mut replay = defender.respond(sys, "defender", &pending[0]).unwrap().report;
+    let mut replay = defender
+        .respond(sys, "defender", &pending[0])
+        .unwrap()
+        .report;
     replay.shot_index = 0;
-    let (status, _) = post_json(create_router(node.clone()), "/api/respond", serde_json::to_string(&replay).unwrap()).await;
+    let (status, _) = post_json(
+        create_router(node.clone()),
+        "/api/respond",
+        serde_json::to_string(&replay).unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // Public ledger shows only the result bits.
     let resp = create_router(node.clone())
-        .oneshot(Request::builder().uri("/api/results").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/results")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let text = String::from_utf8(bytes.to_vec()).unwrap();
     assert!(text.contains("\"is_hit\":true"));
 
     // Verifying-key fingerprint is exposed so players can check they agree.
     let resp = create_router(node.clone())
-        .oneshot(Request::builder().uri("/api/zk").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/zk")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -189,7 +247,7 @@ async fn test_zero_knowledge_round_trip_over_http() {
 #[tokio::test]
 async fn test_mine_for_shots() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
-    
+
     // Register a player first
     {
         let mut coordinator = node.coordinator.write().await;
@@ -221,7 +279,7 @@ async fn test_mine_for_shots() {
 #[tokio::test]
 async fn test_fire_shot() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
-    
+
     // Register a player and mine for shots
     {
         let mut coordinator = node.coordinator.write().await;
@@ -256,7 +314,7 @@ async fn test_fire_shot() {
 #[tokio::test]
 async fn test_fire_shot_without_shots() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
-    
+
     // Register a player but don't mine for shots
     {
         let mut coordinator = node.coordinator.write().await;
@@ -313,10 +371,12 @@ async fn test_fire_shot_without_shots() {
 #[tokio::test]
 async fn test_get_peers() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
-    
+
     // Add some peers
-    node.add_peer(Peer::new("localhost".to_string(), 8081)).await;
-    node.add_peer(Peer::new("localhost".to_string(), 8082)).await;
+    node.add_peer(Peer::new("localhost".to_string(), 8081))
+        .await;
+    node.add_peer(Peer::new("localhost".to_string(), 8082))
+        .await;
 
     let app = create_router(node.clone());
 
@@ -353,7 +413,7 @@ async fn test_add_peer() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     // Verify peer was added
     let peers = node.get_peers().await;
     assert_eq!(peers.len(), 1);
@@ -415,7 +475,7 @@ async fn test_receive_transaction() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     // Verify transaction was added
     let coordinator = node.coordinator.read().await;
     assert_eq!(coordinator.blockchain.pending_transactions.len(), 1);
@@ -424,7 +484,7 @@ async fn test_receive_transaction() {
 #[tokio::test]
 async fn test_receive_valid_block() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
-    
+
     // Create a valid block
     let mut block = {
         let coordinator = node.coordinator.read().await;
@@ -453,7 +513,7 @@ async fn test_receive_valid_block() {
 #[tokio::test]
 async fn test_receive_invalid_block_wrong_index() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
-    
+
     // Create a block with wrong index
     let mut block = Block::new(99, vec![], "hash".to_string());
     block.mine(2);
@@ -478,7 +538,7 @@ async fn test_receive_invalid_block_wrong_index() {
 #[tokio::test]
 async fn test_receive_invalid_block_wrong_previous_hash() {
     let node = Arc::new(NetworkNode::new("test_node".to_string(), 8080, 10, 2));
-    
+
     // Create a block with wrong previous hash
     let mut block = Block::new(1, vec![], "wrong_hash".to_string());
     block.mine(2);

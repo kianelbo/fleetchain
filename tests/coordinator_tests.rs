@@ -25,11 +25,11 @@ fn test_coordinator_creation() {
 #[test]
 fn test_register_player() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     let result = common::register(&mut coordinator, &"player1".to_string(), &ships);
-    
+
     assert!(result.is_ok());
     assert_eq!(coordinator.players.len(), 1);
 }
@@ -42,7 +42,11 @@ fn test_register_player_invalid_commitment() {
     let proof = secret.prove_setup(common::sys()).unwrap();
 
     // Not a field element at all.
-    let result = coordinator.register_player("player1".to_string(), "wrong_commitment_hash".to_string(), &proof);
+    let result = coordinator.register_player(
+        "player1".to_string(),
+        "wrong_commitment_hash".to_string(),
+        &proof,
+    );
     assert!(result.is_err());
 
     // Well-formed commitment, but not the one the proof is about.
@@ -56,34 +60,40 @@ fn test_register_player_invalid_commitment() {
 #[test]
 fn test_register_multiple_players() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     for i in 0..3 {
         let ships = vec![
-            Ship::new(format!("Carrier{}", i), vec![(i, 0), (i, 1), (i, 2), (i, 3)]),
+            Ship::new(
+                format!("Carrier{}", i),
+                vec![(i, 0), (i, 1), (i, 2), (i, 3)],
+            ),
             Ship::new(format!("Cruiser{}", i), vec![(i, 4), (i, 5), (i, 6)]),
             Ship::new(format!("Submarine{}", i), vec![(i, 7), (i, 8)]),
             Ship::new(format!("Destroyer{}", i), vec![(i, 9)]),
         ];
-        
+
         common::register(&mut coordinator, &format!("player{}", i), &ships).unwrap();
     }
-    
+
     assert_eq!(coordinator.players.len(), 3);
 }
 
 #[test]
 fn test_mine_for_shots() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
-    
+
     let shots = coordinator.mine_for_shots("player1").unwrap();
     assert!(shots > 0);
 
     // Registration awards 1 shot, mining adds `shots` more
-    assert_eq!(coordinator.blockchain.get_unspent_shots("player1"), (1 + shots) as usize);
+    assert_eq!(
+        coordinator.blockchain.get_unspent_shots("player1"),
+        (1 + shots) as usize
+    );
 }
 
 #[test]
@@ -96,11 +106,11 @@ fn test_mine_for_nonexistent_player() {
 #[test]
 fn test_fire_shot() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
-    
+
     // After registration, player already has 1 shot UTXO
     assert_eq!(coordinator.blockchain.get_unspent_shots("player1"), 1);
 
@@ -123,9 +133,9 @@ fn test_fire_shot() {
 #[test]
 fn test_fire_shot_without_shots() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
 
     // Registration grants 1 shot: first fire should succeed
@@ -139,18 +149,21 @@ fn test_fire_shot_without_shots() {
 #[test]
 fn test_get_active_players() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     for i in 0..3 {
         let ships = vec![
-            Ship::new(format!("Carrier{}", i), vec![(i, 0), (i, 1), (i, 2), (i, 3)]),
+            Ship::new(
+                format!("Carrier{}", i),
+                vec![(i, 0), (i, 1), (i, 2), (i, 3)],
+            ),
             Ship::new(format!("Cruiser{}", i), vec![(i, 4), (i, 5), (i, 6)]),
             Ship::new(format!("Submarine{}", i), vec![(i, 7), (i, 8)]),
             Ship::new(format!("Destroyer{}", i), vec![(i, 9)]),
         ];
-        
+
         common::register(&mut coordinator, &format!("player{}", i), &ships).unwrap();
     }
-    
+
     let active = coordinator.get_active_players();
     assert_eq!(active.len(), 3);
 }
@@ -158,24 +171,24 @@ fn test_get_active_players() {
 #[test]
 fn test_verify_blockchain() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
     coordinator.mine_for_shots("player1").unwrap();
-    
+
     assert!(coordinator.verify_blockchain());
 }
 
 #[test]
 fn test_game_stats() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
     coordinator.mine_for_shots("player1").unwrap();
-    
+
     let stats = coordinator.get_stats();
     assert_eq!(stats.total_players, 1);
     assert_eq!(stats.active_players, 1);
@@ -185,18 +198,18 @@ fn test_game_stats() {
 #[test]
 fn test_multiple_shots_and_mining() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
-    
+
     // Mine and shoot multiple times
     for i in 0..5 {
         coordinator.mine_for_shots("player1").unwrap();
         coordinator.fire_shot("player1".to_string(), i, i).unwrap();
         coordinator.mine_for_shots("player1").unwrap(); // Mine to include the shot
     }
-    
+
     let stats = coordinator.get_stats();
     assert_eq!(stats.total_shots, 5);
 }
@@ -204,7 +217,7 @@ fn test_multiple_shots_and_mining() {
 #[test]
 fn test_overlapping_ships_different_players() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     // Player 1
     let ships1 = vec![
         Ship::new("Carrier1".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
@@ -212,7 +225,7 @@ fn test_overlapping_ships_different_players() {
         Ship::new("Submarine1".to_string(), vec![(4, 0), (4, 1)]),
         Ship::new("Destroyer1".to_string(), vec![(6, 0)]),
     ];
-    
+
     // Player 2 with overlapping position
     let ships2 = vec![
         Ship::new("Carrier2".to_string(), vec![(0, 0), (1, 0), (2, 0), (3, 0)]),
@@ -220,50 +233,50 @@ fn test_overlapping_ships_different_players() {
         Ship::new("Submarine2".to_string(), vec![(0, 4), (1, 4)]),
         Ship::new("Destroyer2".to_string(), vec![(0, 6)]),
     ];
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships1).unwrap();
     common::register(&mut coordinator, &"player2".to_string(), &ships2).unwrap();
-    
+
     assert_eq!(coordinator.players.len(), 2);
 }
 
 #[test]
 fn test_blockchain_grows_with_mining() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
-    
+
     let initial_length = coordinator.blockchain.chain.len();
-    
+
     for _ in 0..3 {
         coordinator.mine_for_shots("player1").unwrap();
     }
-    
+
     assert_eq!(coordinator.blockchain.chain.len(), initial_length + 3);
 }
 
 #[test]
 fn test_pending_transactions_cleared_after_mining() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
-    
+
     // Mine to get additional shots (registration already granted 1)
     coordinator.mine_for_shots("player1").unwrap();
     coordinator.mine_for_shots("player1").unwrap();
     coordinator.mine_for_shots("player1").unwrap();
-    
+
     // Fire multiple shots
     for i in 0..3 {
         coordinator.fire_shot("player1".to_string(), i, i).unwrap();
     }
-    
+
     assert_eq!(coordinator.blockchain.pending_transactions.len(), 3);
-    
+
     // Mine to clear pending
     coordinator.mine_for_shots("player1").unwrap();
     assert_eq!(coordinator.blockchain.pending_transactions.len(), 0);
@@ -272,15 +285,15 @@ fn test_pending_transactions_cleared_after_mining() {
 #[test]
 fn test_stats_serialization() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     let ships = create_valid_fleet();
-    
+
     common::register(&mut coordinator, &"player1".to_string(), &ships).unwrap();
-    
+
     let stats = coordinator.get_stats();
     let json = serde_json::to_string(&stats).unwrap();
     let deserialized: fleetchain::coordinator::GameStats = serde_json::from_str(&json).unwrap();
-    
+
     assert_eq!(stats.total_players, deserialized.total_players);
     assert_eq!(stats.blockchain_length, deserialized.blockchain_length);
 }
@@ -288,19 +301,22 @@ fn test_stats_serialization() {
 #[test]
 fn test_concurrent_players_mining() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     // Register two players
     for i in 0..2 {
         let ships = vec![
-            Ship::new(format!("Carrier{}", i), vec![(i, 0), (i, 1), (i, 2), (i, 3)]),
+            Ship::new(
+                format!("Carrier{}", i),
+                vec![(i, 0), (i, 1), (i, 2), (i, 3)],
+            ),
             Ship::new(format!("Cruiser{}", i), vec![(i, 4), (i, 5), (i, 6)]),
             Ship::new(format!("Submarine{}", i), vec![(i, 7), (i, 8)]),
             Ship::new(format!("Destroyer{}", i), vec![(i, 9)]),
         ];
-        
+
         common::register(&mut coordinator, &format!("player{}", i), &ships).unwrap();
     }
-    
+
     // Both players mine
     coordinator.mine_for_shots("player0").unwrap();
     coordinator.mine_for_shots("player1").unwrap();
@@ -323,7 +339,7 @@ fn test_fleet_validation_correct_fleet() {
 #[test]
 fn test_fleet_validation_wrong_number_of_ships() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     // Only 3 ships instead of 4
     let ships = vec![
         Ship::new("Carrier".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
@@ -340,7 +356,7 @@ fn test_fleet_validation_wrong_number_of_ships() {
 #[test]
 fn test_fleet_validation_wrong_ship_sizes() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     // Wrong sizes: two 2-cell ships instead of 1,2,3,4
     let ships = vec![
         Ship::new("Ship1".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
@@ -358,7 +374,7 @@ fn test_fleet_validation_wrong_ship_sizes() {
 #[test]
 fn test_fleet_validation_diagonal_placement() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     // Diagonal ship - invalid
     let ships = vec![
         Ship::new("Carrier".to_string(), vec![(0, 0), (1, 1), (2, 2), (3, 3)]), // Diagonal!
@@ -376,7 +392,7 @@ fn test_fleet_validation_diagonal_placement() {
 #[test]
 fn test_fleet_validation_non_consecutive_placement() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     // Non-consecutive horizontal placement
     let ships = vec![
         Ship::new("Carrier".to_string(), vec![(0, 0), (0, 1), (0, 3), (0, 4)]), // Gap at (0,2)
@@ -394,7 +410,7 @@ fn test_fleet_validation_non_consecutive_placement() {
 #[test]
 fn test_fleet_validation_vertical_placement() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     // All ships placed vertically - should be valid
     let ships = vec![
         Ship::new("Carrier".to_string(), vec![(0, 0), (1, 0), (2, 0), (3, 0)]),
@@ -411,7 +427,7 @@ fn test_fleet_validation_vertical_placement() {
 #[test]
 fn test_defeated_player_cannot_mine() {
     let mut coordinator = GameCoordinator::new(10, 2);
-    
+
     // Register player with small fleet for easy defeat
     let ships = vec![
         Ship::new("Carrier".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
@@ -445,28 +461,31 @@ fn test_defeated_player_cannot_mine() {
 #[test]
 fn test_large_scale_game() {
     let mut coordinator = GameCoordinator::new(20, 2);
-    
+
     // Register 10 players
     for i in 0..10 {
         let ships = vec![
-            Ship::new(format!("Carrier{}", i), vec![(i, 0), (i, 1), (i, 2), (i, 3)]),
+            Ship::new(
+                format!("Carrier{}", i),
+                vec![(i, 0), (i, 1), (i, 2), (i, 3)],
+            ),
             Ship::new(format!("Cruiser{}", i), vec![(i, 4), (i, 5), (i, 6)]),
             Ship::new(format!("Submarine{}", i), vec![(i, 7), (i, 8)]),
             Ship::new(format!("Destroyer{}", i), vec![(i, 9)]),
         ];
-        
+
         common::register(&mut coordinator, &format!("player{}", i), &ships).unwrap();
     }
-    
+
     assert_eq!(coordinator.players.len(), 10);
-    
+
     // Each player mines and shoots
     for i in 0..10 {
         coordinator.mine_for_shots(&format!("player{}", i)).unwrap();
         coordinator.fire_shot(format!("player{}", i), i, i).unwrap();
         coordinator.mine_for_shots(&format!("player{}", i)).unwrap(); // Mine to include shot
     }
-    
+
     let stats = coordinator.get_stats();
     assert_eq!(stats.total_players, 10);
     assert_eq!(stats.total_shots, 10);

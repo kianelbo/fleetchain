@@ -45,7 +45,11 @@ pub struct Segment {
 }
 
 pub fn b2s(b: bool) -> Scalar {
-    if b { Scalar::ONE } else { Scalar::ZERO }
+    if b {
+        Scalar::ONE
+    } else {
+        Scalar::ZERO
+    }
 }
 
 pub fn u2s(v: u8) -> Scalar {
@@ -57,7 +61,11 @@ pub fn derive_segments(placements: &[ShipPlacement]) -> Vec<Segment> {
     let mut out = Vec::with_capacity(FLEET_CELLS);
     for (p, &len) in placements.iter().zip(FLEET_SPEC.iter()) {
         for t in 0..len as u8 {
-            let (x, y) = if p.vertical { (p.x, p.y.wrapping_add(t)) } else { (p.x.wrapping_add(t), p.y) };
+            let (x, y) = if p.vertical {
+                (p.x, p.y.wrapping_add(t))
+            } else {
+                (p.x.wrapping_add(t), p.y)
+            };
             out.push(Segment { x, y, alive: true });
         }
     }
@@ -139,7 +147,11 @@ impl Circuit<Scalar> for SetupCircuit {
         }
 
         let digest = hash_gadget(&mut cs.namespace(|| "commit"), &inputs)?;
-        enforce_equal(&mut cs.namespace(|| "opens commitment"), &digest, &commit_in);
+        enforce_equal(
+            &mut cs.namespace(|| "opens commitment"),
+            &digest,
+            &commit_in,
+        );
         Ok(())
     }
 }

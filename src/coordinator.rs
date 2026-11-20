@@ -87,7 +87,11 @@ impl GameCoordinator {
     }
 
     /// Create a new GameCoordinator with blockchain persistence
-    pub fn with_persistence(grid_size: u8, mining_difficulty: usize, blockchain_path: PathBuf) -> Self {
+    pub fn with_persistence(
+        grid_size: u8,
+        mining_difficulty: usize,
+        blockchain_path: PathBuf,
+    ) -> Self {
         let blockchain = if Blockchain::file_exists(&blockchain_path) {
             println!("Loading existing blockchain from {:?}...", blockchain_path);
             match Blockchain::load_from_file(&blockchain_path) {
@@ -174,11 +178,16 @@ impl GameCoordinator {
 
         // A copied registration (same commitment and proof under a new name)
         // would let the copycat replay the victim's public responses.
-        if self.players.values().any(|p| p.initial_commitment == commitment || p.commitment == commitment) {
+        if self
+            .players
+            .values()
+            .any(|p| p.initial_commitment == commitment || p.commitment == commitment)
+        {
             return Err("Commitment already registered".to_string());
         }
 
-        self.verifier().verify_setup(&commitment, self.grid.size, setup_proof)?;
+        self.verifier()
+            .verify_setup(&commitment, self.grid.size, setup_proof)?;
 
         // Award an initial registration shot (UTXO) to the player
         self.blockchain.award_registration_shot(&player_id);
@@ -296,7 +305,10 @@ impl GameCoordinator {
 
     /// Verified responses for one shot.
     pub fn shot_results(&self, shot_index: u64) -> Vec<&ShotResponse> {
-        self.responses.iter().filter(|r| r.shot_index == shot_index).collect()
+        self.responses
+            .iter()
+            .filter(|r| r.shot_index == shot_index)
+            .collect()
     }
 
     fn is_overdue(&self, player: &PlayerState) -> bool {
@@ -338,7 +350,10 @@ impl GameCoordinator {
     pub fn report_hit(&mut self, report: HitReport) -> Result<ShotOutcome, String> {
         self.enforce_timeouts();
 
-        let player = self.players.get(&report.player_id).ok_or("Player not found")?;
+        let player = self
+            .players
+            .get(&report.player_id)
+            .ok_or("Player not found")?;
         if !player.alive {
             return Err("Defeated players do not respond to shots".to_string());
         }
@@ -360,7 +375,9 @@ impl GameCoordinator {
         let new_commitment = scalar_from_hex(&report.new_commitment)
             .map_err(|e| format!("Invalid new commitment: {e}"))?;
         if new_commitment == player.commitment {
-            return Err("New commitment must differ from the current one (fresh salt required)".to_string());
+            return Err(
+                "New commitment must differ from the current one (fresh salt required)".to_string(),
+            );
         }
 
         self.verifier().verify_shot(
@@ -373,7 +390,10 @@ impl GameCoordinator {
             &report.proof,
         )?;
 
-        let player = self.players.get_mut(&report.player_id).expect("checked above");
+        let player = self
+            .players
+            .get_mut(&report.player_id)
+            .expect("checked above");
         player.commitment = new_commitment;
         player.next_shot = shot.index + 1;
         player.alive = report.is_alive;
@@ -388,19 +408,25 @@ impl GameCoordinator {
             new_commitment: scalar_to_hex(&new_commitment),
         });
 
-        Ok(ShotOutcome { shot_index: shot.index, is_hit: report.is_hit, defeated: !report.is_alive })
+        Ok(ShotOutcome {
+            shot_index: shot.index,
+            is_hit: report.is_hit,
+            defeated: !report.is_alive,
+        })
     }
 
     /// Check if a player is defeated (sunk, or forfeited by missing a deadline)
     pub fn is_player_defeated(&self, player_id: &str) -> bool {
-        self.players.get(player_id)
+        self.players
+            .get(player_id)
             .map(|p| p.is_defeated() || self.is_overdue(p))
             .unwrap_or(false)
     }
 
     /// Get all active players
     pub fn get_active_players(&self) -> Vec<String> {
-        self.players.iter()
+        self.players
+            .iter()
             .filter(|(_, p)| !p.is_defeated() && !self.is_overdue(p))
             .map(|(id, _)| id.clone())
             .collect()

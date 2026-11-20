@@ -1,16 +1,16 @@
 #![allow(dead_code)] // the binary re-declares the library modules wholesale
-mod blockchain;
-mod game;
-mod crypto;
-mod coordinator;
-mod network;
 mod api;
+mod blockchain;
+mod coordinator;
+mod crypto;
+mod game;
+mod network;
 mod zk;
 
 use clap::Parser;
 use network::{NetworkNode, Peer};
-use std::sync::Arc;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use zk::{Verifier, ZkSystem};
 
 /// FleetChain: Distributed Blockchain Battleship
@@ -83,19 +83,24 @@ fn ensure_zk_keys(params: &Path) -> Arc<Verifier> {
         eprintln!("         Whoever runs this can forge proofs. Development use only.");
         let sys = ZkSystem::generate(&mut rand::rngs::OsRng).expect("ZK setup failed");
         let f = std::fs::File::create(params).expect("cannot write proving keys");
-        sys.write(std::io::BufWriter::new(f)).expect("cannot write proving keys");
+        sys.write(std::io::BufWriter::new(f))
+            .expect("cannot write proving keys");
         println!("✓ Wrote proving keys to {:?}", params);
         sys
     };
     let f = std::fs::File::create(&vk).expect("cannot write verifying keys");
-    sys.verifier.write(std::io::BufWriter::new(f)).expect("cannot write verifying keys");
+    sys.verifier
+        .write(std::io::BufWriter::new(f))
+        .expect("cannot write verifying keys");
     println!("✓ Wrote verifying keys to {:?}", vk);
     sys.verifier.clone()
 }
 
 fn load_proving_system(params: &Path) -> ZkSystem {
-    let f = std::fs::File::open(params).unwrap_or_else(|e| panic!("Cannot open {:?}: {}", params, e));
-    ZkSystem::read(std::io::BufReader::new(f)).unwrap_or_else(|e| panic!("Cannot read {:?}: {}", params, e))
+    let f =
+        std::fs::File::open(params).unwrap_or_else(|e| panic!("Cannot open {:?}: {}", params, e));
+    ZkSystem::read(std::io::BufReader::new(f))
+        .unwrap_or_else(|e| panic!("Cannot read {:?}: {}", params, e))
 }
 
 #[tokio::main]
@@ -115,8 +120,7 @@ async fn main() {
         // Create data directory if it doesn't exist
         let data_dir = PathBuf::from("./data");
         if !data_dir.exists() {
-            std::fs::create_dir_all(&data_dir)
-                .expect("Failed to create data directory");
+            std::fs::create_dir_all(&data_dir).expect("Failed to create data directory");
         }
         data_dir.join(format!("{}_blockchain.json", args.node_id))
     };
@@ -151,7 +155,7 @@ async fn main() {
                     let peer = Peer::new(host.to_string(), port);
                     node.add_peer(peer.clone()).await;
                     println!("✓ Added peer: {}", peer.url());
-                    
+
                     // Announce ourselves to the peer
                     if let Err(e) = node.announce_to_peer(&peer).await {
                         eprintln!("✗ Failed to announce to peer: {}", e);
@@ -226,7 +230,11 @@ fn demo_register(
     let proof = secret.prove_setup(sys).expect("setup proving");
     match game.register_player(id.to_string(), secret.commitment_hex(), &proof) {
         Ok(_) => {
-            println!("✓ {} registered. Public commitment: {}...", id, &secret.commitment_hex()[..16]);
+            println!(
+                "✓ {} registered. Public commitment: {}...",
+                id,
+                &secret.commitment_hex()[..16]
+            );
             Some(secret)
         }
         Err(e) => {
@@ -237,7 +245,12 @@ fn demo_register(
 }
 
 /// Answer every shot `id` still owes, printing what becomes public.
-fn demo_respond(game: &mut coordinator::GameCoordinator, sys: &ZkSystem, id: &str, secret: &mut zk::FleetSecret) {
+fn demo_respond(
+    game: &mut coordinator::GameCoordinator,
+    sys: &ZkSystem,
+    id: &str,
+    secret: &mut zk::FleetSecret,
+) {
     for shot in game.pending_shots(id) {
         let pending = match secret.respond(sys, id, &shot) {
             Ok(p) => p,
@@ -256,7 +269,11 @@ fn demo_respond(game: &mut coordinator::GameCoordinator, sys: &ZkSystem, id: &st
                     shot.y,
                     shot.shooter,
                     if out.is_hit { "HIT" } else { "miss" },
-                    if out.defeated { "  -- fleet destroyed!" } else { "" }
+                    if out.defeated {
+                        "  -- fleet destroyed!"
+                    } else {
+                        ""
+                    }
                 );
                 secret.apply(pending);
             }
@@ -269,19 +286,31 @@ fn demo_game(game: &mut coordinator::GameCoordinator, sys: &ZkSystem) {
     use game::Ship;
 
     println!("--- Registration (commitment + zero-knowledge fleet proof) ---");
-    let mut p1 = demo_register(game, sys, "player1", vec![
-        Ship::new("carrier".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
-        Ship::new("cruiser".to_string(), vec![(2, 0), (2, 1), (2, 2)]),
-        Ship::new("submarine".to_string(), vec![(4, 0), (4, 1)]),
-        Ship::new("destroyer".to_string(), vec![(6, 0)]),
-    ]);
-    let mut p2 = demo_register(game, sys, "player2", vec![
-        Ship::new("carrier".to_string(), vec![(5, 5), (5, 6), (5, 7), (5, 8)]),
-        Ship::new("cruiser".to_string(), vec![(7, 5), (7, 6), (7, 7)]),
-        Ship::new("submarine".to_string(), vec![(9, 5), (9, 6)]),
-        Ship::new("destroyer".to_string(), vec![(0, 9)]),
-    ]);
-    let (Some(p1), Some(p2)) = (p1.as_mut(), p2.as_mut()) else { return };
+    let mut p1 = demo_register(
+        game,
+        sys,
+        "player1",
+        vec![
+            Ship::new("carrier".to_string(), vec![(0, 0), (0, 1), (0, 2), (0, 3)]),
+            Ship::new("cruiser".to_string(), vec![(2, 0), (2, 1), (2, 2)]),
+            Ship::new("submarine".to_string(), vec![(4, 0), (4, 1)]),
+            Ship::new("destroyer".to_string(), vec![(6, 0)]),
+        ],
+    );
+    let mut p2 = demo_register(
+        game,
+        sys,
+        "player2",
+        vec![
+            Ship::new("carrier".to_string(), vec![(5, 5), (5, 6), (5, 7), (5, 8)]),
+            Ship::new("cruiser".to_string(), vec![(7, 5), (7, 6), (7, 7)]),
+            Ship::new("submarine".to_string(), vec![(9, 5), (9, 6)]),
+            Ship::new("destroyer".to_string(), vec![(0, 9)]),
+        ],
+    );
+    let (Some(p1), Some(p2)) = (p1.as_mut(), p2.as_mut()) else {
+        return;
+    };
 
     println!("\n{}", game.get_stats());
 
@@ -326,7 +355,11 @@ fn demo_game(game: &mut coordinator::GameCoordinator, sys: &ZkSystem) {
     // Display blockchain
     println!("\n--- Blockchain ---");
     for (i, block) in game.blockchain.chain.iter().enumerate() {
-        println!("Block #{}: {} transactions, hash: {}...",
-            i, block.transactions.len(), &block.hash[..16]);
+        println!(
+            "Block #{}: {} transactions, hash: {}...",
+            i,
+            block.transactions.len(),
+            &block.hash[..16]
+        );
     }
 }
